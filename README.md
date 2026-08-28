@@ -158,8 +158,7 @@ then fetches the session record and cross-checks it against what the live calls
 claimed, catching values that are computed and spoken correctly but stored
 wrongly.
 
-Latest run: **15/15 scenarios**, **59/59 audit cross-checks**, p50 4.8ms, p95
-9.0ms across 30 tool calls.
+Latest run: Verified in production against a real voice call placed through Sarvam Voice Agents: identity verification (including a retry the caller recovered from), eligibility with a real EMI, consent captured with the caller's verbatim words, and a complete audit trail. Full eval suite against the deployed service: **15/15** scenarios, **59/59** audit cross-checks, p50 68ms.
 
 Scenarios cover clean approval, counter-offer, hard decline, misheard-then-corrected
 identity, exhausted attempts, sanctions hit, refused consent, disputed decision,
