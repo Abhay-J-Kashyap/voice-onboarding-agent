@@ -29,6 +29,10 @@ The prompt describes the flow. The service enforces it. A model that skips
 verification and jumps to consent gets a 409 and a recoverable message, not a
 polite reminder.
 
+## Demo
+Listen to the Agent in action here:
+[▶️ Play Voice Onboarding Demo](./assets/voice-agent-demo.wav)
+
 ## Quick start
 
 ```bash
