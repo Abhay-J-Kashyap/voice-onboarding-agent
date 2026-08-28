@@ -31,7 +31,8 @@ polite reminder.
 
 ## Demo
 Listen to the Agent in action here:
-[▶️ Play Voice Onboarding Demo](./assets/voice-agent-demo.wav)
+
+https://github.com/Abhay-J-Kashyap/voice-onboarding-agent/assets/voice-agent-demo.wav
 
 ## Quick start
 
