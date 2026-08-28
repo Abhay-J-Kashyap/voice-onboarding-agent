@@ -60,9 +60,17 @@ Listed rather than hidden, because a reviewer will find them anyway.
   wrong the moment a second instance or a schema change appears. Alembic is the
   fix.
 - **No transcript-level scoring.** The harness scores the tool layer
-  deterministically. Whether the agent *said* the right thing is scored by hand
+  deterministically, and cross-checks the stored record against the live
+  responses. Whether the agent *said* the right thing is still scored by hand
   against `evals/rubric.md`. Automating it means diffing spoken numbers against
   tool responses per turn.
+
+  This gap was narrower than it looked, and closing part of it exposed a real
+  bug: the monthly instalment was computed correctly, returned correctly, and
+  never persisted, because every check only inspected what the service said
+  rather than what it wrote. The audit cross-checks in `run_evals.py` now cover
+  that class of failure — sequence, state, eligibility figures, consent,
+  escalation references, and PAN redaction in the stored payload.
 - **Shared secret, not mTLS or signed requests.** Right weight for one trusted
   caller; wrong if the tool surface is ever exposed more widely.
 - **SQLite in the default configuration.** Adequate for one instance, not for

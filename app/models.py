@@ -174,6 +174,7 @@ class EligibilityAssessment(Base):
     )
     approved_amount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     interest_rate: Mapped[float] = mapped_column(default=0.0, nullable=False)
+    monthly_instalment: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     reasons: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     policy_version: Mapped[str] = mapped_column(String(20), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

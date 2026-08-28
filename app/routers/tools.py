@@ -244,6 +244,7 @@ def check_eligibility(
             decision=outcome.decision,
             approved_amount=outcome.approved_amount,
             interest_rate=outcome.interest_rate,
+            monthly_instalment=outcome.monthly_instalment,
             reasons=outcome.reasons,
             policy_version=outcome.policy_version,
         )

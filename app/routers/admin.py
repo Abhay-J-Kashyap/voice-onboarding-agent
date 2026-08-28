@@ -73,7 +73,7 @@ def get_session_audit(
                 decision=assessment.decision,
                 approved_amount=assessment.approved_amount,
                 interest_rate=assessment.interest_rate,
-                monthly_instalment=0,
+                monthly_instalment=assessment.monthly_instalment,
                 reasons=assessment.reasons,
                 policy_version=assessment.policy_version,
             )

@@ -133,11 +133,11 @@ def test_closed_session_refuses_further_tool_calls(client, session_id):
 
 
 def test_audit_endpoint_reconstructs_the_call(client, verified_session):
-    client.post(
+    live = client.post(
         "/v1/tools/check_eligibility",
         json={"session_id": verified_session, **ELIGIBILITY_PAYLOAD},
         headers=AUTH,
-    )
+    ).json()
     client.post(
         "/v1/tools/record_consent",
         json={
@@ -159,6 +159,11 @@ def test_audit_endpoint_reconstructs_the_call(client, verified_session):
     ]
     assert all(c["latency_ms"] >= 0 for c in audit["tool_calls"])
     assert audit["eligibility"]["decision"] == "approved"
+    # Regression: the audit row once hard-coded this to 0 instead of persisting
+    # the value the live tool response already returned. Assert equality against
+    # the live figure, not a literal, so a re-introduced mismatch fails loudly.
+    assert audit["eligibility"]["monthly_instalment"] > 0
+    assert audit["eligibility"]["monthly_instalment"] == live["data"]["monthly_instalment"]
     assert audit["consents"][0]["granted"] is True
 
 

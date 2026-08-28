@@ -102,7 +102,7 @@ a log line or an audit row, so an unredacted PAN never touches disk.
 verification must not consume an attempt, and a retried hand-off must not open a
 second ticket.
 
-## Two bugs the eval harness caught
+## Three bugs, and what each one changed
 
 Both only appear when calls arrive in quick succession against a real server, so
 the unit tests missed both. They are the most useful thing in this repository.
@@ -123,6 +123,28 @@ The generalisable rule: in a retry-safe handler, *identify the request, check
 whether it already happened, then check whether it is allowed.* Both bugs have
 regression tests in `tests/test_idempotency.py` and scenarios in the harness.
 
+**A computed value was never persisted — and the harness missed it too.** The
+eligibility engine calculated the monthly instalment correctly, and
+`check_eligibility` returned it to the agent, which spoke it to the caller. But
+`EligibilityAssessment` had no column for it, the insert never passed it, and the
+audit endpoint hard-coded `monthly_instalment=0`. Every test passed. The caller
+heard the right number and the permanent record held a zero.
+
+The interesting part is why nothing caught it. Both layers only ever checked what
+the service *said*, never what it *stored* — so a field that was computed right,
+spoken right, and written wrong was invisible to all of them. The fix was three
+lines; closing the gap was the real work.
+
+`run_evals.py` now fetches `GET /v1/sessions/{id}` after every scenario and
+cross-checks the durable record against the live responses: the tool sequence,
+the final state, every eligibility figure, consent evidence, the escalation
+ticket reference, and that no unredacted PAN appears in the stored payload. The
+checks are derived from the scenario definition, so new scenarios are covered
+automatically.
+
+Reintroducing the bug drops the suite from 15/15 to 11/15 with 8 failing
+cross-checks — which is the only way to know an eval is worth having.
+
 ## Evaluation
 
 `evals/scenarios.py` holds 15 caller personas as data — each one a scripted tool
@@ -130,7 +152,14 @@ sequence plus the outcome policy requires, and a one-line note on what it protec
 against. The runner drives them against a live service and emits a scored report
 with latency percentiles.
 
-Latest run: **15/15 passing**, p50 5.3ms, p95 10.6ms across 30 tool calls.
+The harness scores two layers. The **live layer** checks each response: right
+outcome, right state, right data, and a speakable message. The **audit layer**
+then fetches the session record and cross-checks it against what the live calls
+claimed, catching values that are computed and spoken correctly but stored
+wrongly.
+
+Latest run: **15/15 scenarios**, **59/59 audit cross-checks**, p50 4.8ms, p95
+9.0ms across 30 tool calls.
 
 Scenarios cover clean approval, counter-offer, hard decline, misheard-then-corrected
 identity, exhausted attempts, sanctions hit, refused consent, disputed decision,
