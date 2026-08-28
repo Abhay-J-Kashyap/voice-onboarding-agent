@@ -1,0 +1,20 @@
+[project]
+name = "kyc-onboarding-tool-service"
+version = "1.0.0"
+description = "Backend tool service for a BFSI voice onboarding agent"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 95
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]  # FastAPI's Depends() in defaults is idiomatic.
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]

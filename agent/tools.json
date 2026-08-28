@@ -1,0 +1,151 @@
+{
+  "_comment": "Live-action tool definitions for the Sarvam Voice Agents platform. Set base_url to the deployed service and send the shared secret in the x-api-key header on every call. The platform's call id should be forwarded as x-trace-id so telephony and tool logs share one identifier.",
+  "base_url": "https://your-service.onrender.com",
+  "headers": {
+    "x-api-key": "${KYC_TOOL_API_KEY}",
+    "x-trace-id": "${call_id}",
+    "content-type": "application/json"
+  },
+  "session_bootstrap": {
+    "_comment": "Call once when the call connects. Store session_id and pass it to every subsequent tool.",
+    "method": "POST",
+    "path": "/v1/sessions",
+    "body": {
+      "external_call_id": "${call_id}",
+      "channel": "voice",
+      "language": "${language}"
+    }
+  },
+  "tools": [
+    {
+      "name": "verify_identity",
+      "description": "Verify the caller against the customer record. Call this before anything else. Returns outcome 'ok' when verified, 'retry' when the details did not match and an attempt remains, or 'blocked' when no attempts remain or the caller cannot be served over the phone.",
+      "method": "POST",
+      "path": "/v1/tools/verify_identity",
+      "parameters": {
+        "type": "object",
+        "required": ["session_id", "full_name", "date_of_birth", "pan"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "Session id returned when the call started."
+          },
+          "full_name": {
+            "type": "string",
+            "description": "Full name exactly as the caller said it. Honorifics are handled server side."
+          },
+          "date_of_birth": {
+            "type": "string",
+            "format": "date",
+            "description": "Date of birth as YYYY-MM-DD."
+          },
+          "pan": {
+            "type": "string",
+            "description": "PAN as spoken. Spaces and lower case are normalised server side."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Stable key for this attempt. Reuse the same value when retrying after a timeout so the retry does not consume an extra verification attempt."
+          }
+        }
+      }
+    },
+    {
+      "name": "check_eligibility",
+      "description": "Run the credit policy and return the decision. Only valid after identity has been verified. Never state an amount, rate, or instalment that did not come from this tool.",
+      "method": "POST",
+      "path": "/v1/tools/check_eligibility",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "product_code",
+          "requested_amount",
+          "tenure_months",
+          "declared_monthly_income",
+          "employment_type"
+        ],
+        "properties": {
+          "session_id": { "type": "string" },
+          "product_code": {
+            "type": "string",
+            "enum": ["personal_loan", "credit_card"]
+          },
+          "requested_amount": {
+            "type": "integer",
+            "description": "Amount requested in rupees."
+          },
+          "tenure_months": {
+            "type": "integer",
+            "description": "Repayment period in months, between 6 and 84."
+          },
+          "declared_monthly_income": {
+            "type": "integer",
+            "description": "Monthly income in rupees as stated by the caller."
+          },
+          "employment_type": {
+            "type": "string",
+            "enum": ["salaried", "self_employed", "unemployed"]
+          },
+          "idempotency_key": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "record_consent",
+      "description": "Record the caller's agreement to the terms. Only valid after eligibility has been assessed. Pass the caller's actual words, not a summary.",
+      "method": "POST",
+      "path": "/v1/tools/record_consent",
+      "parameters": {
+        "type": "object",
+        "required": ["session_id", "consent_type", "granted", "verbatim_response"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "consent_type": {
+            "type": "string",
+            "enum": ["terms_and_conditions", "credit_bureau_pull", "data_processing"]
+          },
+          "granted": {
+            "type": "boolean",
+            "description": "True only for a clear yes. Ambiguity is not consent."
+          },
+          "verbatim_response": {
+            "type": "string",
+            "description": "What the caller actually said, transcribed."
+          },
+          "disclosure_version": { "type": "string" },
+          "idempotency_key": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "escalate",
+      "description": "Transfer the call to a human and open a ticket. Callable at any point in the call. Always a valid choice.",
+      "method": "POST",
+      "path": "/v1/tools/escalate",
+      "parameters": {
+        "type": "object",
+        "required": ["session_id", "reason_code", "summary"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "reason_code": {
+            "type": "string",
+            "enum": [
+              "identity_verification_failed",
+              "customer_disputes_decision",
+              "out_of_scope_request",
+              "customer_requested_human",
+              "low_confidence_transcription",
+              "technical_failure"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "description": "One or two sentences so the human does not have to start over."
+          },
+          "idempotency_key": { "type": "string" }
+        }
+      }
+    }
+  ]
+}

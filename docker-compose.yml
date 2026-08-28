@@ -1,0 +1,14 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      ENVIRONMENT: docker
+      API_KEY: ${API_KEY:-local-dev-key}
+      DATABASE_URL: sqlite:////srv/data/kyc_agent.db
+    volumes:
+      - kyc-data:/srv/data
+
+volumes:
+  kyc-data:
