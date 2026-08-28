@@ -31,7 +31,7 @@ polite reminder.
 
 ## Demo
 
-🔊 [Listen to a live call](assets/voice-agent-demo.wav) — 1:45, recorded through
+🔊 [Listen to a live call](assets/voice-agent-demo.mp4) — 1:45, recorded through
 Sarvam Voice Agents against the deployed service.
 
 ## Quick start
