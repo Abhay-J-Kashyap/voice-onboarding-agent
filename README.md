@@ -30,9 +30,9 @@ verification and jumps to consent gets a 409 and a recoverable message, not a
 polite reminder.
 
 ## Demo
-Listen to the Agent in action here:
 
-https://github.com/Abhay-J-Kashyap/voice-onboarding-agent/assets/voice-agent-demo.wav
+🔊 [Listen to a live call](assets/voice-agent-demo.wav) — 1:45, recorded through
+Sarvam Voice Agents against the deployed service.
 
 ## Quick start
 
