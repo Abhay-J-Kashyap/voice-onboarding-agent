@@ -105,6 +105,9 @@ class Customer(Base):
     date_of_birth: Mapped[str] = mapped_column(String(10), nullable=False)  # ISO date
     pan: Mapped[str] = mapped_column(String(10), unique=True, nullable=False)
     phone: Mapped[str] = mapped_column(String(20), nullable=False)
+    #: Nullable because SMS-only customers are a real segment; the OTP channel
+    #: is chosen per deployment, not per customer.
+    email: Mapped[str | None] = mapped_column(String(255))
     monthly_income: Mapped[int] = mapped_column(Integer, nullable=False)
     employment_type: Mapped[str] = mapped_column(String(30), nullable=False)
     existing_emi: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

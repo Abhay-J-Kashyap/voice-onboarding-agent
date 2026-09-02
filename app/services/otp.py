@@ -31,6 +31,8 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import Customer, OnboardingSession, OtpChallenge
+from app.observability import mask_email
+from app.services.email import get_email_sender
 from app.services.sms import get_sms_sender
 
 
@@ -72,6 +74,7 @@ class VerifyOutcome(StrEnum):
 class IssueResult:
     outcome: IssueOutcome
     masked_phone: str | None = None
+    masked_email: str | None = None
     #: Populated only when demo mode is enabled. Never reaches `agent_message`.
     demo_code: str | None = None
     retry_after_seconds: int | None = None
@@ -149,12 +152,28 @@ def issue_challenge(
     db.flush()
 
     minutes = max(1, settings.otp_ttl_seconds // 60)
-    delivered = get_sms_sender().send(
-        phone=customer.phone,
-        message=(
-            f"{code} is your Meridian Finance verification code. "
-            f"It expires in {minutes} minutes. Never share it with anyone."
-        ),
+
+    # Which channel actually carries the code. Email needs no DLT registration,
+    # so it is the practical default; SMS remains available and fully tested
+    # for deployments that have completed the paperwork.
+    if settings.otp_delivery_channel == "email":
+        if not customer.email:
+            return IssueResult(IssueOutcome.DELIVERY_FAILED)
+        delivered = get_email_sender().send_passcode(
+            email=customer.email, code=code, ttl_minutes=minutes
+        )
+        if not delivered:
+            return IssueResult(IssueOutcome.DELIVERY_FAILED)
+        if is_resend:
+            session.otp_resends += 1
+        return IssueResult(
+            IssueOutcome.SENT,
+            masked_email=mask_email(customer.email),
+            demo_code=code if settings.otp_demo_mode else None,
+        )
+
+    delivered = get_sms_sender().send_passcode(
+        phone=customer.phone, code=code, ttl_minutes=minutes
     )
     if not delivered:
         return IssueResult(IssueOutcome.DELIVERY_FAILED)

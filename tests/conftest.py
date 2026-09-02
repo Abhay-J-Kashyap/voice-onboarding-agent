@@ -73,23 +73,21 @@ def session_id(client) -> str:
 
 
 class CapturingSmsSender:
-    """Records dispatched messages so tests can read the passcode."""
+    """Records dispatched passcodes so tests can read them back."""
 
     def __init__(self) -> None:
-        self.messages: list[tuple[str, str]] = []
+        self.sent: list[tuple[str, str, int]] = []
         self.should_fail = False
 
-    def send(self, *, phone: str, message: str) -> bool:
+    def send_passcode(self, *, phone: str, code: str, ttl_minutes: int) -> bool:
         if self.should_fail:
             return False
-        self.messages.append((phone, message))
+        self.sent.append((phone, code, ttl_minutes))
         return True
 
     @property
     def last_code(self) -> str:
-        """Extract the passcode from the most recent message."""
-        _, message = self.messages[-1]
-        return next(token for token in message.split() if token.isdigit())
+        return self.sent[-1][1]
 
 
 @pytest.fixture

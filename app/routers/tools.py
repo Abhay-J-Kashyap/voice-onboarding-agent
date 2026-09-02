@@ -55,11 +55,20 @@ def _passcode_response(
     """
     if issued.outcome is otp_service.IssueOutcome.SENT:
         opener = "Thank you, I have found your record." if first_issue else "Done."
-        message = (
-            f"{opener} I have sent a passcode to your registered mobile ending "
-            f"{issued.masked_phone}. Could you read it back to me?"
-        )
-        data: dict = {"phone_last4": issued.masked_phone}
+        if issued.masked_email is not None:
+            # Reading a masked email aloud is nonsensical for a voice call, so
+            # the channel is named but the address is not spoken.
+            message = (
+                f"{opener} I have sent a passcode to your registered email. "
+                "Could you read it back to me?"
+            )
+            data: dict = {"email_masked": issued.masked_email}
+        else:
+            message = (
+                f"{opener} I have sent a passcode to your registered mobile "
+                f"ending {issued.masked_phone}. Could you read it back to me?"
+            )
+            data = {"phone_last4": issued.masked_phone}
         if issued.demo_code is not None:
             data["demo_otp"] = issued.demo_code
         return ToolResponse(

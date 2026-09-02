@@ -58,13 +58,30 @@ is a single function with a narrow interface precisely so that swap is contained
 | Code expires mid-call | retry with an offer to resend |
 | Code overheard on a recorded line | single use; `consumed_at` is set on first success |
 | Attacker uses the agent to spam a phone | issuance capped per customer inside a rolling window |
-| SMS provider outage | issuance returns `error` and routes to a human; the challenge is not silently lost |
+| SMS provider outage | one bounded retry on a timeout or 5xx, then `error` and a hand-off; the challenge is not silently lost |
+| Misconfigured template or sender id | 4xx fails immediately without retrying, since retrying cannot fix configuration |
+| Provider slow while a caller waits | timeout 3s with one retry, a worst case of about 6.5s, inside the platform's 10s tool timeout |
+| Customer has no address on the configured channel | `DELIVERY_FAILED` and a hand-off, rather than a silent no-op |
 | Database disclosure | only salted SHA-256 digests are stored, so no live codes are recoverable |
 
 The passcode is never placed in `agent_message`, so the model has no way to read
 it aloud even by accident. In demo mode it appears in `data.demo_otp`, which the
 Sarvam response template does not forward to the model — that setting exists so
 a live demo can run without an SMS provider and must be off in production.
+
+## Two delivery channels, one interface
+
+`OTP_DELIVERY_CHANNEL` selects SMS or email; the rest of the system is
+unaware which one is active. `IssueResult` carries both `masked_phone` and
+`masked_email` and only ever populates the one that applies, so the router
+decides how to phrase the message without knowing which provider ran.
+
+SMS needs DLT registration as a business before it sends for real in India,
+which an individual developer cannot complete. Email needs nothing beyond an
+API key — Resend's sandbox sender works against the account holder's own
+address with no domain verification — which is why it is the channel actually
+used for this project's demo, with SMS built, tested, and ready for a
+deployment that has done the paperwork.
 
 ## Known gaps
 

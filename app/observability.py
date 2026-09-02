@@ -45,6 +45,19 @@ def mask_phone(phone: str | None) -> str | None:
     return f"{'*' * (len(digits) - 4)}{digits[-4:]}"
 
 
+def mask_email(email: str | None) -> str | None:
+    """Keep enough of an email to recognise it, mask the rest."""
+    if not email or "@" not in email:
+        return email
+    local, _, domain = email.partition("@")
+    domain_name, _, tld = domain.rpartition(".")
+    local_visible = local[:2] if len(local) > 2 else local[:1]
+    domain_visible = domain_name[:2] if len(domain_name) > 2 else domain_name[:1]
+    if tld:
+        return f"{local_visible}***@{domain_visible}***.{tld}"
+    return f"{local_visible}***@***"
+
+
 class JsonFormatter(logging.Formatter):
     """Emit one JSON object per line so logs are queryable without parsing rules."""
 

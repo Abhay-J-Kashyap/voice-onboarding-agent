@@ -96,6 +96,20 @@ resend, single use, expiring, capped on attempts, and rate limited **per
 customer rather than per session** — sessions are free to create, so a
 per-session cap would be no cap at all.
 
+Delivery sits behind an interface that passes the code and its lifetime rather
+than a finished message, because India's DLT regime means commercial SMS is sent
+as a registered template id plus variables, not as free text. Two channels are
+built to the same pattern: `Msg91SmsSender` sends SMS through a DLT-registered
+template, `ResendEmailSender` sends email through Resend's API. SMS needs
+business registration to actually deliver in India; email does not, which is
+why `OTP_DELIVERY_CHANNEL=email` is what this project's demo actually runs on.
+`IssueResult` carries both a masked phone and a masked email and only ever
+populates the one the active channel used, so the response layer phrases the
+message correctly without knowing which provider ran. The retry budget on both
+channels is deliberately tight — three second timeout, one retry, a worst case
+inside the voice platform's ten second tool timeout, because a customer is on
+the line while it runs.
+
 **Server-side state machine.** `SessionState` has an explicit transition table,
 and every tool call passes `require_state`. Escalation is reachable from every
 live state by design — if the agent decides it is out of its depth, the service
@@ -208,7 +222,8 @@ app/
     sessions.py        state guards, idempotency, audit
     kyc.py             identity matching
     otp.py             passcode issuance, verification, rate limiting
-    sms.py             delivery interface; console implementation
+    sms.py             SMS delivery; console and MSG91 implementations
+    email.py           email delivery; console and Resend implementations
     eligibility.py     credit policy engine
     handoff.py         consent records, escalation routing
   routers/
