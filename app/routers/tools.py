@@ -25,20 +25,81 @@ from app.schemas import (
     CheckEligibilityRequest,
     EscalateRequest,
     RecordConsentRequest,
+    ResendOtpRequest,
     StartSessionRequest,
     StartSessionResponse,
     ToolResponse,
     VerifyIdentityRequest,
+    VerifyOtpRequest,
 )
 from app.security import require_api_key
 from app.services import eligibility as eligibility_service
 from app.services import handoff, kyc, sessions
+from app.services import otp as otp_service
 
 router = APIRouter(
     prefix="/v1",
     tags=["tools"],
     dependencies=[Depends(require_api_key)],
 )
+
+
+def _passcode_response(
+    issued, session, *, first_issue: bool
+) -> ToolResponse:
+    """Turn a passcode issuance result into a speakable envelope.
+
+    The code itself is placed in `data.demo_otp` only when demo mode is on, and
+    never in `agent_message` — the agent's response template reads the message,
+    so the model has no way to say the passcode out loud even by accident.
+    """
+    if issued.outcome is otp_service.IssueOutcome.SENT:
+        opener = "Thank you, I have found your record." if first_issue else "Done."
+        message = (
+            f"{opener} I have sent a passcode to your registered mobile ending "
+            f"{issued.masked_phone}. Could you read it back to me?"
+        )
+        data: dict = {"phone_last4": issued.masked_phone}
+        if issued.demo_code is not None:
+            data["demo_otp"] = issued.demo_code
+        return ToolResponse(
+            outcome="otp_sent",
+            agent_message=message,
+            session_state=session.state,
+            data=data,
+        )
+
+    if issued.outcome is otp_service.IssueOutcome.RESENDS_EXHAUSTED:
+        return ToolResponse(
+            outcome="blocked",
+            agent_message=(
+                "I have sent as many codes as I can on this call. "
+                "Let me pass you to a colleague."
+            ),
+            session_state=session.state,
+            data={"reason": "resends_exhausted"},
+        )
+
+    if issued.outcome is otp_service.IssueOutcome.RATE_LIMITED:
+        return ToolResponse(
+            outcome="blocked",
+            agent_message=(
+                "Too many codes have been requested for this number recently. "
+                "Let me pass you to a colleague."
+            ),
+            session_state=session.state,
+            data={"reason": "rate_limited"},
+        )
+
+    return ToolResponse(
+        outcome="error",
+        agent_message=(
+            "I could not send the passcode just now. "
+            "Let me pass you to a colleague."
+        ),
+        session_state=session.state,
+        data={"reason": "delivery_failed"},
+    )
 
 
 def _rupees(amount: int) -> str:
@@ -159,13 +220,15 @@ def verify_identity(
 
     if result.matched and result.customer is not None:
         session.customer_id = result.customer.id
-        sessions.transition(session, SessionState.IDENTITY_VERIFIED)
-        response = ToolResponse(
-            outcome="ok",
-            agent_message="Thank you, I have verified your details.",
-            session_state=session.state,
-            data={"customer_reference": f"CUST-{result.customer.id:06d}"},
+        sessions.transition(session, SessionState.IDENTITY_MATCHED)
+        # Matching the record is a knowledge factor only. The caller is not
+        # verified until they prove possession of the registered mobile.
+        issued = otp_service.issue_challenge(
+            db, session=session, customer=result.customer
         )
+        response = _passcode_response(issued, session, first_issue=True)
+        if issued.outcome is otp_service.IssueOutcome.SENT:
+            response.data["customer_reference"] = f"CUST-{result.customer.id:06d}"
     else:
         session.identity_attempts += 1
         remaining = settings.max_identity_attempts - session.identity_attempts
@@ -203,6 +266,115 @@ def verify_identity(
             "failure_reason": result.failure_reason,
             "attempt": session.identity_attempts,
         },
+        idempotency_key=payload.idempotency_key,
+    )
+
+
+@router.post("/tools/verify_otp", response_model=ToolResponse)
+def verify_otp(
+    payload: VerifyOtpRequest, db: Session = Depends(get_db)
+) -> ToolResponse:
+    """Check the passcode the caller read back.
+
+    This is the step that actually authorises the application. Everything before
+    it establishes only that the caller knows details printed on a PAN card.
+    """
+    started = time.perf_counter()
+    session = sessions.load_session(db, payload.session_id)
+    SESSION_ID.set(session.id)
+
+    replay = sessions.find_replayed_call(
+        db, session.id, "verify_otp", payload.idempotency_key
+    )
+    if replay is not None:
+        log_event("tool_call_replayed", tool="verify_otp", session_id=session.id)
+        return ToolResponse(**replay.response_digest, trace_id=TRACE_ID.get())
+
+    sessions.require_state(session, SessionState.IDENTITY_MATCHED, tool="verify_otp")
+
+    result = otp_service.verify_challenge(db, session_id=session.id, code=payload.code)
+
+    if result.outcome is otp_service.VerifyOutcome.OK:
+        sessions.transition(session, SessionState.IDENTITY_VERIFIED)
+        response = ToolResponse(
+            outcome="ok",
+            agent_message="Thank you, your identity is verified.",
+            session_state=session.state,
+            data={"verified": True},
+        )
+    elif result.outcome is otp_service.VerifyOutcome.WRONG_CODE:
+        response = ToolResponse(
+            outcome="retry",
+            agent_message=(
+                "That code does not match. Could you read it out once more?"
+            ),
+            session_state=session.state,
+            data={"attempts_remaining": result.attempts_remaining},
+        )
+    elif result.outcome is otp_service.VerifyOutcome.EXPIRED:
+        response = ToolResponse(
+            outcome="retry",
+            agent_message=(
+                "That code has expired. I can send you a new one if you like."
+            ),
+            session_state=session.state,
+            data={"reason": "expired"},
+        )
+    else:
+        # Exhausted attempts, a reused code, or no challenge at all. None of
+        # these are recoverable inside the call.
+        response = ToolResponse(
+            outcome="blocked",
+            agent_message=(
+                "I have not been able to verify that code. "
+                "Let me pass you to a colleague."
+            ),
+            session_state=session.state,
+            data={"reason": result.outcome.value},
+        )
+
+    return _finalize(
+        db,
+        session=session,
+        tool_name="verify_otp",
+        response=response,
+        started=started,
+        # The submitted code is never persisted, only the verdict.
+        request_digest={"result": result.outcome.value},
+        idempotency_key=payload.idempotency_key,
+    )
+
+
+@router.post("/tools/resend_otp", response_model=ToolResponse)
+def resend_otp(
+    payload: ResendOtpRequest, db: Session = Depends(get_db)
+) -> ToolResponse:
+    """Issue a fresh passcode, retiring any earlier one for this session."""
+    started = time.perf_counter()
+    session = sessions.load_session(db, payload.session_id)
+    SESSION_ID.set(session.id)
+
+    replay = sessions.find_replayed_call(
+        db, session.id, "resend_otp", payload.idempotency_key
+    )
+    if replay is not None:
+        log_event("tool_call_replayed", tool="resend_otp", session_id=session.id)
+        return ToolResponse(**replay.response_digest, trace_id=TRACE_ID.get())
+
+    sessions.require_state(session, SessionState.IDENTITY_MATCHED, tool="resend_otp")
+
+    issued = otp_service.issue_challenge(
+        db, session=session, customer=session.customer, is_resend=True
+    )
+    response = _passcode_response(issued, session, first_issue=False)
+
+    return _finalize(
+        db,
+        session=session,
+        tool_name="resend_otp",
+        response=response,
+        started=started,
+        request_digest={"issue_outcome": issued.outcome.value},
         idempotency_key=payload.idempotency_key,
     )
 

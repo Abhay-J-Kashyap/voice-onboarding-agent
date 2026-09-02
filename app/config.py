@@ -26,6 +26,23 @@ class Settings(BaseSettings):
     max_identity_attempts: int = 2
     eligibility_policy_version: str = "v1.0.0"
 
+    # One-time passcode policy. All enforced in the service; the prompt only
+    # describes them.
+    otp_length: int = 6
+    otp_ttl_seconds: int = 300
+    otp_max_verify_attempts: int = 3
+    otp_max_resends: int = 2
+    #: Ceiling on codes issued to one customer inside the window below, so a
+    #: caller cannot be used to spam a stranger's phone.
+    otp_max_per_window: int = 3
+    otp_rate_window_seconds: int = 900
+
+    # Returns the generated passcode in the tool response under `data.demo_otp`
+    # so a live demo can be driven without an SMS provider. The value is never
+    # placed in `agent_message`, so the model cannot read it aloud. MUST be
+    # false in any real deployment.
+    otp_demo_mode: bool = False
+
     # Log level for the structured JSON logger.
     log_level: str = "INFO"
 

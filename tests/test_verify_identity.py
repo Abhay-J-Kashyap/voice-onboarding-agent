@@ -15,7 +15,8 @@ VALID = {
 }
 
 
-def test_matching_details_verify(client, session_id):
+def test_matching_details_send_a_passcode(client, session_id, sms):
+    """A record match is a knowledge factor: it sends a code, it does not verify."""
     response = client.post(
         "/v1/tools/verify_identity",
         json={"session_id": session_id, **VALID},
@@ -23,27 +24,31 @@ def test_matching_details_verify(client, session_id):
     )
     body = response.json()
     assert response.status_code == 200
-    assert body["outcome"] == "ok"
-    assert body["session_state"] == "identity_verified"
+    assert body["outcome"] == "otp_sent"
+    assert body["session_state"] == "identity_matched"
     assert body["data"]["customer_reference"].startswith("CUST-")
+    assert body["data"]["phone_last4"] == "0001"
+    # The passcode must never reach anything the agent can speak.
+    assert "demo_otp" not in body["data"]
+    assert sms.last_code not in body["agent_message"]
 
 
-def test_lowercase_and_spaced_pan_is_normalised(client, session_id):
+def test_lowercase_and_spaced_pan_is_normalised(client, session_id, sms):
     response = client.post(
         "/v1/tools/verify_identity",
         json={"session_id": session_id, **VALID, "pan": "abcde 1234 f"},
         headers=AUTH,
     )
-    assert response.json()["outcome"] == "ok"
+    assert response.json()["outcome"] == "otp_sent"
 
 
-def test_honorific_does_not_break_name_match(client, session_id):
+def test_honorific_does_not_break_name_match(client, session_id, sms):
     response = client.post(
         "/v1/tools/verify_identity",
         json={"session_id": session_id, **VALID, "full_name": "Mr. Rajesh Kumar"},
         headers=AUTH,
     )
-    assert response.json()["outcome"] == "ok"
+    assert response.json()["outcome"] == "otp_sent"
 
 
 def test_dob_mismatch_asks_for_retry(client, session_id):

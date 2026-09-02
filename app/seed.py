@@ -71,6 +71,50 @@ SEED_CUSTOMERS: list[dict] = [
         "credit_score": 800,
         "is_sanctioned": True,
     },
+    # The four below share the clean-approval profile. They exist because
+    # passcode issuance is rate limited per customer, so evaluation scenarios
+    # that each need a fresh code would otherwise collide with one another
+    # inside the rate window.
+    {
+        "full_name": "Anita Desai",
+        "date_of_birth": "1990-02-18",
+        "pan": "FGHIJ6789K",
+        "phone": "+919800000006",
+        "monthly_income": 88_000,
+        "employment_type": "salaried",
+        "existing_emi": 5_000,
+        "credit_score": 771,
+    },
+    {
+        "full_name": "Suresh Menon",
+        "date_of_birth": "1986-06-09",
+        "pan": "GHIJK7890L",
+        "phone": "+919800000007",
+        "monthly_income": 110_000,
+        "employment_type": "salaried",
+        "existing_emi": 12_000,
+        "credit_score": 795,
+    },
+    {
+        "full_name": "Fatima Sheikh",
+        "date_of_birth": "1993-12-24",
+        "pan": "HIJKL8901M",
+        "phone": "+919800000008",
+        "monthly_income": 76_000,
+        "employment_type": "salaried",
+        "existing_emi": 3_000,
+        "credit_score": 758,
+    },
+    {
+        "full_name": "Arjun Nair",
+        "date_of_birth": "1989-03-05",
+        "pan": "IJKLM9012N",
+        "phone": "+919800000009",
+        "monthly_income": 92_000,
+        "employment_type": "salaried",
+        "existing_emi": 6_500,
+        "credit_score": 767,
+    },
 ]
 
 

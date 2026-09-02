@@ -40,6 +40,11 @@ class SessionState(enum.StrEnum):
     """
 
     STARTED = "started"
+    #: Record located and the caller knows its details. A knowledge factor only:
+    #: anyone holding a photocopy of the PAN card gets this far.
+    IDENTITY_MATCHED = "identity_matched"
+    #: Possession of the registered mobile proven by passcode. This is the state
+    #: that actually authorises the application to proceed.
     IDENTITY_VERIFIED = "identity_verified"
     ELIGIBILITY_ASSESSED = "eligibility_assessed"
     CONSENT_RECORDED = "consent_recorded"
@@ -51,6 +56,11 @@ class SessionState(enum.StrEnum):
 #: Allowed forward transitions. Terminal states have no outgoing edges.
 ALLOWED_TRANSITIONS: dict[SessionState, set[SessionState]] = {
     SessionState.STARTED: {
+        SessionState.IDENTITY_MATCHED,
+        SessionState.ESCALATED,
+        SessionState.BLOCKED,
+    },
+    SessionState.IDENTITY_MATCHED: {
         SessionState.IDENTITY_VERIFIED,
         SessionState.ESCALATED,
         SessionState.BLOCKED,
@@ -116,6 +126,7 @@ class OnboardingSession(Base):
     )
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
     identity_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    otp_resends: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
@@ -155,6 +166,36 @@ class ToolCall(Base):
     )
 
     session: Mapped[OnboardingSession] = relationship(back_populates="tool_calls")
+
+
+class OtpChallenge(Base):
+    """A one-time passcode issued to a customer's registered mobile.
+
+    The code itself is never stored. Only a salted digest is kept, so a database
+    disclosure does not hand an attacker live passcodes, and nothing in the
+    audit trail can be replayed. Challenges are single use: `consumed_at` is set
+    on the first successful verification and checked on every subsequent one.
+    """
+
+    __tablename__ = "otp_challenges"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("onboarding_sessions.id"), nullable=False, index=True
+    )
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id"), nullable=False, index=True
+    )
+    code_salt: Mapped[str] = mapped_column(String(32), nullable=False)
+    code_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
 
 
 class EligibilityAssessment(Base):

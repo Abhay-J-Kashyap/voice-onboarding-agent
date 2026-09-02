@@ -22,7 +22,11 @@ from app.models import EligibilityDecision, SessionState
 PAN_PATTERN = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 
 #: Outcome vocabulary shared by every tool. The agent branches on this field.
-Outcome = Literal["ok", "retry", "declined", "rejected", "blocked", "error"]
+#: `otp_sent` is distinct from `ok` so the model cannot mistake a located record
+#: for a verified caller — the two mean very different things.
+Outcome = Literal[
+    "ok", "otp_sent", "retry", "declined", "rejected", "blocked", "error"
+]
 
 
 class ToolResponse(BaseModel):
@@ -80,6 +84,21 @@ class VerifyIdentityRequest(BaseModel):
         if age > 100:
             raise ValueError("date of birth is out of the accepted range")
         return value
+
+
+class VerifyOtpRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    session_id: str
+    # Wider than the passcode: speech-to-text renders spoken digits with spaces
+    # and hyphens, and the service strips them before comparison.
+    code: str = Field(min_length=4, max_length=20)
+    idempotency_key: str | None = Field(default=None, max_length=64)
+
+
+class ResendOtpRequest(BaseModel):
+    session_id: str
+    idempotency_key: str | None = Field(default=None, max_length=64)
 
 
 class CheckEligibilityRequest(BaseModel):
@@ -141,6 +160,8 @@ class SessionAuditView(BaseModel):
     state: SessionState
     language: str
     identity_attempts: int
+    otp_resends: int
+    otp_challenges: list[dict[str, Any]]
     customer_reference: str | None
     tool_calls: list[ToolCallView]
     eligibility: EligibilityData | None

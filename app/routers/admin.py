@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.errors import SessionNotFound
-from app.models import ConsentRecord, EligibilityAssessment, Escalation
+from app.models import ConsentRecord, EligibilityAssessment, Escalation, OtpChallenge
 from app.schemas import EligibilityData, SessionAuditView, ToolCallView
 from app.security import require_api_key
 from app.services.sessions import load_session
@@ -59,11 +59,29 @@ def get_session_audit(
         select(Escalation).where(Escalation.session_id == session_id)
     ).scalars().first()
 
+    challenges = db.execute(
+        select(OtpChallenge)
+        .where(OtpChallenge.session_id == session_id)
+        .order_by(OtpChallenge.id)
+    ).scalars().all()
+
     return SessionAuditView(
         session_id=session.id,
         state=session.state,
         language=session.language,
         identity_attempts=session.identity_attempts,
+        otp_resends=session.otp_resends,
+        # Digest and salt are deliberately absent: the audit record proves a
+        # passcode was issued and whether it was used, never what it was.
+        otp_challenges=[
+            {
+                "issued_at": c.created_at,
+                "attempts": c.attempts,
+                "expires_at": c.expires_at,
+                "consumed": c.consumed_at is not None,
+            }
+            for c in challenges
+        ],
         customer_reference=(
             f"CUST-{session.customer_id:06d}" if session.customer_id else None
         ),

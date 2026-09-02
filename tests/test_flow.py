@@ -154,6 +154,7 @@ def test_audit_endpoint_reconstructs_the_call(client, verified_session):
     assert audit["state"] == "completed"
     assert [c["tool_name"] for c in audit["tool_calls"]] == [
         "verify_identity",
+        "verify_otp",
         "check_eligibility",
         "record_consent",
     ]

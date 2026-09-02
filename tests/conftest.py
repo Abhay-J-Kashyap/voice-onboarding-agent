@@ -17,6 +17,7 @@ from app.db import get_db
 from app.main import app
 from app.models import Base, Customer
 from app.seed import SEED_CUSTOMERS
+from app.services import sms as sms_module
 
 API_KEY = get_settings().api_key
 AUTH = {"x-api-key": API_KEY}
@@ -71,9 +72,40 @@ def session_id(client) -> str:
     return response.json()["session_id"]
 
 
+class CapturingSmsSender:
+    """Records dispatched messages so tests can read the passcode."""
+
+    def __init__(self) -> None:
+        self.messages: list[tuple[str, str]] = []
+        self.should_fail = False
+
+    def send(self, *, phone: str, message: str) -> bool:
+        if self.should_fail:
+            return False
+        self.messages.append((phone, message))
+        return True
+
+    @property
+    def last_code(self) -> str:
+        """Extract the passcode from the most recent message."""
+        _, message = self.messages[-1]
+        return next(token for token in message.split() if token.isdigit())
+
+
 @pytest.fixture
-def verified_session(client, session_id) -> str:
-    """A session that has already cleared identity verification."""
+def sms(monkeypatch):
+    sender = CapturingSmsSender()
+    monkeypatch.setattr(sms_module, "_sender", sender)
+    return sender
+
+
+@pytest.fixture
+def matched_session(client, session_id, sms) -> str:
+    """A session where the record was found and a passcode has been sent.
+
+    The caller is not verified at this point: they have proven knowledge of
+    details printed on a PAN card, nothing more.
+    """
     response = client.post(
         "/v1/tools/verify_identity",
         json={
@@ -84,5 +116,17 @@ def verified_session(client, session_id) -> str:
         },
         headers=AUTH,
     )
-    assert response.json()["outcome"] == "ok"
+    assert response.json()["outcome"] == "otp_sent"
     return session_id
+
+
+@pytest.fixture
+def verified_session(client, matched_session, sms) -> str:
+    """A session that has cleared both identity factors."""
+    response = client.post(
+        "/v1/tools/verify_otp",
+        json={"session_id": matched_session, "code": sms.last_code},
+        headers=AUTH,
+    )
+    assert response.json()["outcome"] == "ok"
+    return matched_session

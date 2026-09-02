@@ -7,6 +7,15 @@ is scored separately by hand against `evals/rubric.md`.
 
 Scenarios are data, not code, so adding a regression case for a bug found in
 production is a matter of appending a dict.
+
+Two mechanics support the passcode flow:
+
+* A step can `capture` a field from the response into a named variable, and a
+  later step can reference it as `{{name}}` in its payload. That is how a
+  scenario reads the passcode issued to it.
+* Scenarios that need the passcode are marked `needs_demo_otp`. When the target
+  service does not expose it — which is the correct configuration for anything
+  real — the runner reports them as skipped rather than failed.
 """
 
 from __future__ import annotations
@@ -27,6 +36,8 @@ class Step:
     expect_data: dict[str, Any] = field(default_factory=dict)
     #: Expected HTTP status, for cases where rejection is the correct behaviour.
     expect_status: int = 200
+    #: Map of variable name to response `data` field, saved for later steps.
+    capture: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -36,8 +47,12 @@ class Scenario:
     #: What this case is protecting against, in one line.
     intent: str
     steps: list[Step]
+    #: True when the scenario needs the passcode echoed back by the service.
+    needs_demo_otp: bool = False
 
 
+# Identity payloads. Passcode issuance is rate limited per customer, so
+# scenarios that each need a fresh code use different people.
 RAJESH = {
     "full_name": "Rajesh Kumar",
     "date_of_birth": "1988-04-12",
@@ -58,6 +73,50 @@ VIKRAM = {
     "date_of_birth": "1979-09-15",
     "pan": "EFGHI5678J",
 }
+ANITA = {
+    "full_name": "Anita Desai",
+    "date_of_birth": "1990-02-18",
+    "pan": "FGHIJ6789K",
+}
+SURESH = {
+    "full_name": "Suresh Menon",
+    "date_of_birth": "1986-06-09",
+    "pan": "GHIJK7890L",
+}
+FATIMA = {
+    "full_name": "Fatima Sheikh",
+    "date_of_birth": "1993-12-24",
+    "pan": "HIJKL8901M",
+}
+ARJUN = {
+    "full_name": "Arjun Nair",
+    "date_of_birth": "1989-03-05",
+    "pan": "IJKLM9012N",
+}
+
+#: Capture the passcode from a verify_identity or resend_otp response.
+CAPTURE_OTP = {"otp_code": "demo_otp"}
+
+
+def matched(identity: dict) -> Step:
+    """A successful record match, which issues a passcode."""
+    return Step(
+        "verify_identity",
+        identity,
+        "otp_sent",
+        "identity_matched",
+        capture=CAPTURE_OTP,
+    )
+
+
+def passcode_ok() -> Step:
+    """Reading back the correct passcode, which completes verification."""
+    return Step(
+        "verify_otp",
+        {"code": "{{otp_code}}"},
+        "ok",
+        "identity_verified",
+    )
 
 
 SCENARIOS: list[Scenario] = [
@@ -65,8 +124,10 @@ SCENARIOS: list[Scenario] = [
         id="S01",
         persona="Cooperative applicant, clean approval",
         intent="The happy path must complete and record consent.",
+        needs_demo_otp=True,
         steps=[
-            Step("verify_identity", RAJESH, "ok", "identity_verified"),
+            matched(RAJESH),
+            passcode_ok(),
             Step(
                 "check_eligibility",
                 {
@@ -96,8 +157,10 @@ SCENARIOS: list[Scenario] = [
         id="S02",
         persona="Applicant asks for more than they can service",
         intent="An unaffordable request becomes a counter-offer, not a decline.",
+        needs_demo_otp=True,
         steps=[
-            Step("verify_identity", PRIYA, "ok", "identity_verified"),
+            matched(PRIYA),
+            passcode_ok(),
             Step(
                 "check_eligibility",
                 {
@@ -117,8 +180,10 @@ SCENARIOS: list[Scenario] = [
         id="S03",
         persona="Applicant below the credit floor",
         intent="A decline is delivered without inventing an alternative offer.",
+        needs_demo_otp=True,
         steps=[
-            Step("verify_identity", IMRAN, "ok", "identity_verified"),
+            matched(IMRAN),
+            passcode_ok(),
             Step(
                 "check_eligibility",
                 {
@@ -146,7 +211,7 @@ SCENARIOS: list[Scenario] = [
                 "started",
                 {"retries_remaining": 1},
             ),
-            Step("verify_identity", RAJESH, "ok", "identity_verified"),
+            Step("verify_identity", RAJESH, "otp_sent", "identity_matched"),
         ],
     ),
     Scenario(
@@ -176,15 +241,17 @@ SCENARIOS: list[Scenario] = [
         id="S07",
         persona="Applicant declines the terms",
         intent="Refusal is recorded as evidence, not treated as a failure.",
+        needs_demo_otp=True,
         steps=[
-            Step("verify_identity", RAJESH, "ok"),
+            matched(ANITA),
+            passcode_ok(),
             Step(
                 "check_eligibility",
                 {
                     "product_code": "personal_loan",
                     "requested_amount": 100_000,
                     "tenure_months": 24,
-                    "declared_monthly_income": 95_000,
+                    "declared_monthly_income": 88_000,
                     "employment_type": "salaried",
                 },
                 "ok",
@@ -206,8 +273,10 @@ SCENARIOS: list[Scenario] = [
         id="S08",
         persona="Applicant disputes the decision",
         intent="Disputes route to underwriting rather than being argued with.",
+        needs_demo_otp=True,
         steps=[
-            Step("verify_identity", IMRAN, "ok"),
+            matched(IMRAN),
+            passcode_ok(),
             Step(
                 "check_eligibility",
                 {
@@ -313,6 +382,29 @@ SCENARIOS: list[Scenario] = [
         ],
     ),
     Scenario(
+        id="S14",
+        persona="Declared income far exceeds the record",
+        intent="Suspicious data is referred to a human, never auto-approved.",
+        needs_demo_otp=True,
+        steps=[
+            matched(PRIYA),
+            passcode_ok(),
+            Step(
+                "check_eligibility",
+                {
+                    "product_code": "personal_loan",
+                    "requested_amount": 100_000,
+                    "tenure_months": 24,
+                    "declared_monthly_income": 250_000,
+                    "employment_type": "salaried",
+                },
+                "ok",
+                "eligibility_assessed",
+                {"decision": "referred"},
+            ),
+        ],
+    ),
+    Scenario(
         id="S15",
         persona="Platform retries a hand-off that already succeeded",
         intent="A retried escalation returns the original ticket, not a second one.",
@@ -340,23 +432,75 @@ SCENARIOS: list[Scenario] = [
         ],
     ),
     Scenario(
-        id="S14",
-        persona="Declared income far exceeds the record",
-        intent="Suspicious data is referred to a human, never auto-approved.",
+        id="S16",
+        persona="Caller mishears a digit of the passcode, then corrects it",
+        intent="A wrong passcode is recoverable inside the attempt budget.",
+        needs_demo_otp=True,
         steps=[
-            Step("verify_identity", PRIYA, "ok"),
+            matched(SURESH),
+            Step(
+                "verify_otp",
+                {"code": "000000"},
+                "retry",
+                "identity_matched",
+                {"attempts_remaining": 2},
+            ),
+            passcode_ok(),
+        ],
+    ),
+    Scenario(
+        id="S17",
+        persona="Caller cannot produce the passcode at all",
+        intent="Passcode attempts are capped; the call is blocked, not looped.",
+        needs_demo_otp=True,
+        steps=[
+            matched(FATIMA),
+            Step("verify_otp", {"code": "000000"}, "retry", "identity_matched"),
+            Step("verify_otp", {"code": "000001"}, "retry", "identity_matched"),
+            Step(
+                "verify_otp",
+                {"code": "000002"},
+                "blocked",
+                "identity_matched",
+                {"reason": "attempts_exhausted"},
+            ),
+        ],
+    ),
+    Scenario(
+        id="S18",
+        persona="Caller never received the passcode and asks for another",
+        intent="A resend retires the old code and the new one works.",
+        needs_demo_otp=True,
+        steps=[
+            matched(ARJUN),
+            Step(
+                "resend_otp",
+                {},
+                "otp_sent",
+                "identity_matched",
+                capture=CAPTURE_OTP,
+            ),
+            passcode_ok(),
+        ],
+    ),
+    Scenario(
+        id="S19",
+        persona="Model treats a located record as a verified caller",
+        intent="Knowing PAN details is not proof of identity; eligibility is refused.",
+        needs_demo_otp=True,
+        steps=[
+            matched(ANITA),
             Step(
                 "check_eligibility",
                 {
                     "product_code": "personal_loan",
                     "requested_amount": 100_000,
                     "tenure_months": 24,
-                    "declared_monthly_income": 250_000,
+                    "declared_monthly_income": 88_000,
                     "employment_type": "salaried",
                 },
-                "ok",
-                "eligibility_assessed",
-                {"decision": "referred"},
+                "rejected",
+                expect_status=409,
             ),
         ],
     ),

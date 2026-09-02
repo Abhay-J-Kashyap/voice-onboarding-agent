@@ -31,6 +31,10 @@ jobs:
           cache: pip
       - run: pip install -r requirements-dev.txt
       - name: Seed and start service
+        # Demo mode echoes the passcode so the two-factor scenarios can run.
+        # Safe here because the service is ephemeral and never reachable.
+        env:
+          OTP_DEMO_MODE: "true"
         run: |
           python -m app.seed
           nohup uvicorn app.main:app --port 8000 &

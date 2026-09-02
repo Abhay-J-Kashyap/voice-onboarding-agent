@@ -66,9 +66,16 @@ class ScenarioResult:
     scenario: Scenario
     steps: list[StepResult]
     audit_checks: list[AuditCheck] = field(default_factory=list)
+    skipped_reason: str | None = None
+
+    @property
+    def skipped(self) -> bool:
+        return self.skipped_reason is not None
 
     @property
     def passed(self) -> bool:
+        if self.skipped:
+            return True
         return all(s.passed for s in self.steps) and all(
             c.passed for c in self.audit_checks
         )
@@ -82,6 +89,17 @@ class ScenarioResult:
             if not check.passed:
                 return f"audit/{check.name}: {check.detail}"
         return ""
+
+
+def substitute(payload: dict[str, Any], captured: dict[str, str]) -> dict[str, Any]:
+    """Replace {{name}} placeholders with values captured from earlier steps."""
+    resolved: dict[str, Any] = {}
+    for key, value in payload.items():
+        if isinstance(value, str) and value.startswith("{{") and value.endswith("}}"):
+            resolved[key] = captured.get(value[2:-2], value)
+        else:
+            resolved[key] = value
+    return resolved
 
 
 def expected_recorded_tools(scenario: Scenario) -> list[str]:
@@ -238,9 +256,10 @@ def run_scenario(client: httpx.Client, scenario: Scenario) -> ScenarioResult:
 
     results: list[StepResult] = []
     responses: list[tuple[str, int, dict[str, Any]]] = []
+    captured: dict[str, str] = {}
 
     for step in scenario.steps:
-        payload = {"session_id": session_id, **step.payload}
+        payload = {"session_id": session_id, **substitute(step.payload, captured)}
         began = time.perf_counter()
         response = client.post(f"/v1/tools/{step.tool}", json=payload)
         latency_ms = round((time.perf_counter() - began) * 1000, 2)
@@ -264,6 +283,22 @@ def run_scenario(client: httpx.Client, scenario: Scenario) -> ScenarioResult:
             )
 
         data = body.get("data") or {}
+
+        for name, source_field in step.capture.items():
+            if source_field in data:
+                captured[name] = str(data[source_field])
+            elif scenario.needs_demo_otp:
+                # The service is not echoing the passcode, which is the correct
+                # configuration for a real deployment. The scenario cannot run.
+                return ScenarioResult(
+                    scenario=scenario,
+                    steps=results,
+                    skipped_reason=(
+                        "passcode not exposed by the service; "
+                        "enable OTP_DEMO_MODE to run this scenario"
+                    ),
+                )
+
         for key, expected in step.expect_data.items():
             if data.get(key) != expected:
                 failures.append(f"data.{key}={data.get(key)!r} != {expected!r}")
@@ -306,8 +341,10 @@ def percentile(values: list[float], pct: float) -> float:
 
 def render_report(results: list[ScenarioResult]) -> str:
     latencies = [s.latency_ms for r in results for s in r.steps]
-    passed = sum(1 for r in results if r.passed)
-    total = len(results)
+    executed = [r for r in results if not r.skipped]
+    skipped = [r for r in results if r.skipped]
+    passed = sum(1 for r in executed if r.passed)
+    total = len(executed)
     all_checks = [c for r in results for c in r.audit_checks]
     checks_passed = sum(1 for c in all_checks if c.passed)
 
@@ -318,7 +355,8 @@ def render_report(results: list[ScenarioResult]) -> str:
         "",
         "## Summary",
         "",
-        f"- Scenarios passed: **{passed}/{total}** ({passed / total:.0%})",
+        f"- Scenarios passed: **{passed}/{total}**"
+        + (f" ({passed / total:.0%})" if total else ""),
         f"- Tool calls executed: {len(latencies)}",
         f"- Audit cross-checks passed: **{checks_passed}/{len(all_checks)}**",
         f"- Latency p50: {percentile(latencies, 50):.1f} ms",
@@ -335,14 +373,23 @@ def render_report(results: list[ScenarioResult]) -> str:
         "| --- | --- | --- | --- | --- |",
     ]
     for result in results:
-        status = "pass" if result.passed else "FAIL"
+        status = "skip" if result.skipped else ("pass" if result.passed else "FAIL")
         lines.append(
             f"| {result.scenario.id} | {result.scenario.persona} "
-            f"| {result.scenario.intent} | {status} | {result.first_failure or '—'} |"
+            f"| {result.scenario.intent} | {status} "
+            f"| {result.skipped_reason or result.first_failure or '—'} |"
         )
 
     lines += [
         "",
+    ]
+    if skipped:
+        lines += [
+            f"{len(skipped)} scenario(s) skipped: the service does not echo",
+            "passcodes, which is the correct setting outside local testing.",
+            "",
+        ]
+    lines += [
         "## Audit cross-checks",
         "",
         "Each scenario's durable record is compared against what the live tool",
@@ -462,7 +509,7 @@ def main() -> int:
                 indent=2,
             )
 
-    failed = [r for r in results if not r.passed]
+    failed = [r for r in results if not r.passed and not r.skipped]
     print(report)
     if failed:
         print(f"\n{len(failed)} scenario(s) failed.", file=sys.stderr)

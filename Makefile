@@ -7,7 +7,7 @@ seed:
 	python -m app.seed
 
 run: seed
-	python -m uvicorn app.main:app --reload --port 8000
+	OTP_DEMO_MODE=true python -m uvicorn app.main:app --reload --port 8000
 
 test:
 	python -m pytest -q

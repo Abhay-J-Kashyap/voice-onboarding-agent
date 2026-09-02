@@ -88,8 +88,8 @@ def test_replayed_escalation_returns_the_same_ticket(client, session_id):
 
 def test_state_transitions_reject_undefined_edges(db_session):
     session = _make_session(db_session)
-    sessions.transition(session, SessionState.IDENTITY_VERIFIED)
-    # started -> completed is not an edge in the machine.
+    sessions.transition(session, SessionState.IDENTITY_MATCHED)
+    # identity_matched -> completed is not an edge in the machine.
     try:
         sessions.transition(session, SessionState.COMPLETED)
     except Exception as exc:  # noqa: BLE001 - asserting the type below

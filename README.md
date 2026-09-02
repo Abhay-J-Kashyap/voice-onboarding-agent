@@ -1,8 +1,9 @@
 # Voice onboarding agent — tool and orchestration layer
 
 A production-shaped backend for a BFSI voice agent that takes a customer through
-loan onboarding over the phone: verify identity, assess eligibility, explain
-terms, capture consent, and hand off to a human when it should.
+loan onboarding over the phone: verify identity with two factors, assess
+eligibility, explain terms, capture consent, and hand off to a human when it
+should.
 
 The voice pipeline runs on Sarvam's managed Voice Agents platform. **This
 repository is everything the platform calls into** — the state machine, the credit
@@ -28,11 +29,6 @@ guarantee. So the split is:
 The prompt describes the flow. The service enforces it. A model that skips
 verification and jumps to consent gets a 409 and a recoverable message, not a
 polite reminder.
-
-## Demo
-
-🔊 [Listen to a live call](assets/voice-agent-demo.wav) — 1:45, recorded through
-Sarvam Voice Agents against the deployed service.
 
 ## Quick start
 
@@ -81,6 +77,19 @@ Then `curl -s -H "$KEY" $API/v1/sessions/$SID | jq .` returns the redacted,
 replayable record of the whole call.
 
 ## Design decisions worth explaining
+
+**Two-factor identity, split across two states.** Matching PAN, date of birth
+and name proves only that the caller knows details printed on a card. A passcode
+sent to the registered mobile proves possession of the phone. Those are
+different claims, so they get different states: `identity_matched` then
+`identity_verified`. Eligibility is unreachable from the first, which means a
+model that treats a located record as a verified caller is refused by the
+service rather than corrected by the prompt.
+
+Passcodes are stored as salted digests and never in plaintext, retired on
+resend, single use, expiring, capped on attempts, and rate limited **per
+customer rather than per session** — sessions are free to create, so a
+per-session cap would be no cap at all.
 
 **Server-side state machine.** `SessionState` has an explicit transition table,
 and every tool call passes `require_state`. Escalation is reachable from every
@@ -163,7 +172,13 @@ then fetches the session record and cross-checks it against what the live calls
 claimed, catching values that are computed and spoken correctly but stored
 wrongly.
 
-Latest run: Verified in production against a real voice call placed through Sarvam Voice Agents: identity verification (including a retry the caller recovered from), eligibility with a real EMI, consent captured with the caller's verbatim words, and a complete audit trail. Full eval suite against the deployed service: **15/15** scenarios, **59/59** audit cross-checks, p50 68ms.
+Latest run: **19/19 scenarios**, **71/71 audit cross-checks**, p50 4.3ms, p95
+6.0ms across 48 tool calls.
+
+Ten scenarios need the service to echo the passcode back, which is only safe
+locally. Run them with `OTP_DEMO_MODE=true`. Against a service without it, those
+scenarios report as skipped rather than failing, so the same suite is meaningful
+in both configurations.
 
 Scenarios cover clean approval, counter-offer, hard decline, misheard-then-corrected
 identity, exhausted attempts, sanctions hit, refused consent, disputed decision,
@@ -187,10 +202,12 @@ app/
   services/
     sessions.py        state guards, idempotency, audit
     kyc.py             identity matching
+    otp.py             passcode issuance, verification, rate limiting
+    sms.py             delivery interface; console implementation
     eligibility.py     credit policy engine
     handoff.py         consent records, escalation routing
   routers/
-    tools.py           the four agent-facing tools
+    tools.py           the six agent-facing tools
     admin.py           health checks, session audit
 agent/
   system_prompt.md     the Sarvam agent prompt
@@ -220,7 +237,7 @@ and no PII retention policy. Each has a stated fix.
 1. Deploy this service somewhere with a public HTTPS URL.
 2. Create a blank agent in the Sarvam Voice Agents console.
 3. Paste `agent/system_prompt.md` into the prompt field.
-4. Register the four tools from `agent/tools.json` as live actions, with the API
+4. Register the six tools from `agent/tools.json` as live actions, with the API
    key in the header and the platform's call id forwarded as `x-trace-id` so
    telephony and tool logs share one identifier.
 5. Place a test call, then `GET /v1/sessions/{id}` to see exactly what happened.

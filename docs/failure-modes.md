@@ -49,13 +49,32 @@ is a single function with a narrow interface precisely so that swap is contained
 | Sanctions hit disclosed to the caller | Never explained. Returns the same generic "cannot verify over the phone" wording as any other block, and routes to `kyc_review` |
 | Consent inferred from silence | Prompt requires an explicit yes; `granted: false` is a legitimate recorded outcome rather than a failure to retry (S07) |
 
+## Passcode failures
+
+| Failure | Handling |
+| --- | --- |
+| Caller mishears a digit | retry with attempts remaining; capped at three (S16, S17) |
+| Caller never receives the code | `resend_otp` issues a new one and retires the old (S18) |
+| Code expires mid-call | retry with an offer to resend |
+| Code overheard on a recorded line | single use; `consumed_at` is set on first success |
+| Attacker uses the agent to spam a phone | issuance capped per customer inside a rolling window |
+| SMS provider outage | issuance returns `error` and routes to a human; the challenge is not silently lost |
+| Database disclosure | only salted SHA-256 digests are stored, so no live codes are recoverable |
+
+The passcode is never placed in `agent_message`, so the model has no way to read
+it aloud even by accident. In demo mode it appears in `data.demo_otp`, which the
+Sarvam response template does not forward to the model — that setting exists so
+a live demo can run without an SMS provider and must be off in production.
+
 ## Known gaps
 
 Listed rather than hidden, because a reviewer will find them anyway.
 
-- **No rate limiting.** A compromised platform key could enumerate PANs against
-  `verify_identity`. Production needs per-key limits and alerting on verification
-  failure rates.
+- **No rate limiting on `verify_identity` itself.** Passcode issuance is now
+  rate limited per customer, which stops the agent being used to flood a
+  stranger's phone. The record lookup is not: a compromised platform key could
+  still enumerate PANs and learn which are customers. Production needs per-key
+  limits and alerting on verification failure rates.
 - **`create_all` instead of migrations.** Fine for a single-instance demo,
   wrong the moment a second instance or a schema change appears. Alembic is the
   fix.

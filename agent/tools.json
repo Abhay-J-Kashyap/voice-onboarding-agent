@@ -1,5 +1,5 @@
 {
-  "_comment": "Live-action tool definitions for the Sarvam Voice Agents platform. Set base_url to the deployed service and send the shared secret in the x-api-key header on every call. The platform's call id should be forwarded as x-trace-id so telephony and tool logs share one identifier.",
+  "_comment": "Live-action tool definitions for the Sarvam Voice Agents platform. Set base_url to the deployed service and send the shared secret in the x-api-key header on every call. The platform's call id should be forwarded as x-trace-id so telephony and tool logs share one identifier. Identity uses two factors: verify_identity locates the record and issues a passcode, verify_otp proves possession of the registered mobile.",
   "base_url": "https://your-service.onrender.com",
   "headers": {
     "x-api-key": "${KYC_TOOL_API_KEY}",
@@ -19,12 +19,17 @@
   "tools": [
     {
       "name": "verify_identity",
-      "description": "Verify the caller against the customer record. Call this before anything else. Returns outcome 'ok' when verified, 'retry' when the details did not match and an attempt remains, or 'blocked' when no attempts remain or the caller cannot be served over the phone.",
+      "description": "Look up the caller's record and send a passcode to their registered mobile. Call this before anything else. Returns 'otp_sent' when the record was found and a code is on its way, 'retry' when the details did not match and an attempt remains, or 'blocked' when no attempts remain or the caller cannot be served over the phone. Note that 'otp_sent' does NOT mean the caller is verified.",
       "method": "POST",
       "path": "/v1/tools/verify_identity",
       "parameters": {
         "type": "object",
-        "required": ["session_id", "full_name", "date_of_birth", "pan"],
+        "required": [
+          "session_id",
+          "full_name",
+          "date_of_birth",
+          "pan"
+        ],
         "properties": {
           "session_id": {
             "type": "string",
@@ -51,8 +56,53 @@
       }
     },
     {
+      "name": "verify_otp",
+      "description": "Check the passcode the caller read back from their phone. This is the step that actually verifies identity. Returns 'ok' when verified, 'retry' when the code was wrong or expired, or 'blocked' when no attempts remain.",
+      "method": "POST",
+      "path": "/v1/tools/verify_otp",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "code"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "description": "The passcode exactly as the caller read it. Digits only; spaces are stripped server side."
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "resend_otp",
+      "description": "Send a fresh passcode, retiring the previous one. Use when the caller did not receive the code or it expired. Capped per call and per customer.",
+      "method": "POST",
+      "path": "/v1/tools/resend_otp",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
       "name": "check_eligibility",
-      "description": "Run the credit policy and return the decision. Only valid after identity has been verified. Never state an amount, rate, or instalment that did not come from this tool.",
+      "description": "Run the credit policy and return the decision. Only valid after the passcode has been verified, not merely after the record was found. Never state an amount, rate, or instalment that did not come from this tool.",
       "method": "POST",
       "path": "/v1/tools/check_eligibility",
       "parameters": {
@@ -66,10 +116,15 @@
           "employment_type"
         ],
         "properties": {
-          "session_id": { "type": "string" },
+          "session_id": {
+            "type": "string"
+          },
           "product_code": {
             "type": "string",
-            "enum": ["personal_loan", "credit_card"]
+            "enum": [
+              "personal_loan",
+              "credit_card"
+            ]
           },
           "requested_amount": {
             "type": "integer",
@@ -85,9 +140,15 @@
           },
           "employment_type": {
             "type": "string",
-            "enum": ["salaried", "self_employed", "unemployed"]
+            "enum": [
+              "salaried",
+              "self_employed",
+              "unemployed"
+            ]
           },
-          "idempotency_key": { "type": "string" }
+          "idempotency_key": {
+            "type": "string"
+          }
         }
       }
     },
@@ -98,12 +159,23 @@
       "path": "/v1/tools/record_consent",
       "parameters": {
         "type": "object",
-        "required": ["session_id", "consent_type", "granted", "verbatim_response"],
+        "required": [
+          "session_id",
+          "consent_type",
+          "granted",
+          "verbatim_response"
+        ],
         "properties": {
-          "session_id": { "type": "string" },
+          "session_id": {
+            "type": "string"
+          },
           "consent_type": {
             "type": "string",
-            "enum": ["terms_and_conditions", "credit_bureau_pull", "data_processing"]
+            "enum": [
+              "terms_and_conditions",
+              "credit_bureau_pull",
+              "data_processing"
+            ]
           },
           "granted": {
             "type": "boolean",
@@ -113,8 +185,12 @@
             "type": "string",
             "description": "What the caller actually said, transcribed."
           },
-          "disclosure_version": { "type": "string" },
-          "idempotency_key": { "type": "string" }
+          "disclosure_version": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
         }
       }
     },
@@ -125,9 +201,15 @@
       "path": "/v1/tools/escalate",
       "parameters": {
         "type": "object",
-        "required": ["session_id", "reason_code", "summary"],
+        "required": [
+          "session_id",
+          "reason_code",
+          "summary"
+        ],
         "properties": {
-          "session_id": { "type": "string" },
+          "session_id": {
+            "type": "string"
+          },
           "reason_code": {
             "type": "string",
             "enum": [
@@ -143,7 +225,9 @@
             "type": "string",
             "description": "One or two sentences so the human does not have to start over."
           },
-          "idempotency_key": { "type": "string" }
+          "idempotency_key": {
+            "type": "string"
+          }
         }
       }
     }
