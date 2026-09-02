@@ -128,22 +128,42 @@ SEED_CUSTOMERS: list[dict] = [
 
 
 def seed(reset: bool = False) -> int:
-    """Insert seed customers. Idempotent: existing PANs are skipped."""
+    """Insert seed customers. Idempotent: existing PANs are backfilled, not skipped.
+
+    A prior deploy's row surviving a redeploy is the normal case on a
+    persistent disk, and a schema addition with no matching data migration
+    will otherwise leave it with nulls in every new column forever. Backfilling
+    only fields that are currently unset — never overwriting a value someone
+    might have edited — keeps this safe to run against a live database.
+    """
     init_db()
     inserted = 0
+    updated = 0
     with SessionLocal() as db:
         if reset:
             db.query(Customer).delete()
             db.commit()
         for row in SEED_CUSTOMERS:
-            exists = db.execute(
+            existing = db.execute(
                 select(Customer).where(Customer.pan == row["pan"])
             ).scalar_one_or_none()
-            if exists:
+            if existing is None:
+                db.add(Customer(**row))
+                inserted += 1
                 continue
-            db.add(Customer(**row))
-            inserted += 1
+            changed = False
+            for field, value in row.items():
+                if getattr(existing, field, None) in (None, "") and value not in (
+                    None,
+                    "",
+                ):
+                    setattr(existing, field, value)
+                    changed = True
+            if changed:
+                updated += 1
         db.commit()
+    if updated:
+        print(f"Backfilled {updated} existing record(s) with new fields.")
     return inserted
 
 
