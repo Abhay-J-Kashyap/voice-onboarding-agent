@@ -21,7 +21,7 @@ SEED_CUSTOMERS: list[dict] = [
         "date_of_birth": "1988-04-12",
         "pan": "ABCDE1234F",
         "phone": "+919800000001",
-        "email": "rajesh.kumar@example.com",
+        "email": "abjkashyap@gmail.com",
         "monthly_income": 95_000,
         "employment_type": "salaried",
         "existing_emi": 8_000,
