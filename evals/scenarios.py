@@ -38,6 +38,10 @@ class Step:
     expect_status: int = 200
     #: Map of variable name to response `data` field, saved for later steps.
     capture: dict[str, str] = field(default_factory=dict)
+    #: Substrings the spoken message must contain. Asserts a response is
+    #: *actionable*, not merely that it has the right outcome — a distinction
+    #: that cost a live call before it was checked here.
+    expect_message_contains: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -428,6 +432,80 @@ SCENARIOS: list[Scenario] = [
                 },
                 "ok",
                 "escalated",
+            ),
+        ],
+    ),
+    Scenario(
+        id="S20",
+        persona="Caller asks for a ten year tenure",
+        intent="A decade is a real personal loan term and must be quotable.",
+        needs_demo_otp=True,
+        steps=[
+            matched(SURESH),
+            passcode_ok(),
+            Step(
+                "check_eligibility",
+                {
+                    "product_code": "personal_loan",
+                    "requested_amount": 1_500_000,
+                    "tenure_months": 120,
+                    "declared_monthly_income": 110_000,
+                    "employment_type": "salaried",
+                },
+                "ok",
+                "eligibility_assessed",
+                {"decision": "approved"},
+            ),
+        ],
+    ),
+    Scenario(
+        id="S21",
+        persona="Caller asks for a tenure beyond policy",
+        intent=(
+            "A rejected value must tell the agent what to ask for instead, "
+            "or it retries the same value and escalates a recoverable call."
+        ),
+        needs_demo_otp=True,
+        steps=[
+            matched(FATIMA),
+            passcode_ok(),
+            Step(
+                "check_eligibility",
+                {
+                    "product_code": "personal_loan",
+                    "requested_amount": 500_000,
+                    "tenure_months": 240,
+                    "declared_monthly_income": 76_000,
+                    "employment_type": "salaried",
+                },
+                "retry",
+                expect_status=422,
+                expect_data={"invalid_fields": ["tenure_months"]},
+                expect_message_contains=["repayment period", "ten years"],
+            ),
+        ],
+    ),
+    Scenario(
+        id="S22",
+        persona="Speech-to-text mangles the employment type",
+        intent="An out-of-vocabulary value names the field and its options.",
+        needs_demo_otp=True,
+        steps=[
+            matched(ARJUN),
+            passcode_ok(),
+            Step(
+                "check_eligibility",
+                {
+                    "product_code": "personal_loan",
+                    "requested_amount": 200_000,
+                    "tenure_months": 36,
+                    "declared_monthly_income": 92_000,
+                    "employment_type": "freelancer",
+                },
+                "retry",
+                expect_status=422,
+                expect_data={"invalid_fields": ["employment_type"]},
+                expect_message_contains=["self-employed"],
             ),
         ],
     ),

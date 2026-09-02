@@ -304,8 +304,14 @@ def run_scenario(client: httpx.Client, scenario: Scenario) -> ScenarioResult:
                 failures.append(f"data.{key}={data.get(key)!r} != {expected!r}")
 
         # Every response must carry something the agent can actually say.
-        if not body.get("agent_message"):
+        message = body.get("agent_message") or ""
+        if not message:
             failures.append("missing agent_message")
+
+        # And, where it matters, something the agent can act on.
+        for fragment in step.expect_message_contains:
+            if fragment.lower() not in message.lower():
+                failures.append(f"agent_message missing {fragment!r}")
 
         results.append(
             StepResult(

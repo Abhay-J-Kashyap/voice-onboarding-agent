@@ -105,7 +105,10 @@ class CheckEligibilityRequest(BaseModel):
     session_id: str
     product_code: Literal["personal_loan", "credit_card"] = "personal_loan"
     requested_amount: int = Field(gt=0, le=5_000_000)
-    tenure_months: int = Field(ge=6, le=84)
+    # Ten years. Personal loans routinely run this long at larger ticket sizes,
+    # and a caller asking for a decade should get an offer or a decline on the
+    # merits, not a validation error they cannot act on.
+    tenure_months: int = Field(ge=6, le=120)
     declared_monthly_income: int = Field(gt=0, le=10_000_000)
     employment_type: Literal["salaried", "self_employed", "unemployed"]
     idempotency_key: str | None = Field(default=None, max_length=64)
@@ -141,6 +144,60 @@ class EscalateRequest(BaseModel):
     ]
     summary: str = Field(min_length=1, max_length=1000)
     idempotency_key: str | None = Field(default=None, max_length=64)
+
+
+#: What to say when a field fails validation.
+#:
+#: A schema rejection is usually the caller being misheard or asking for
+#: something outside policy, and both are recoverable — but only if the agent is
+#: told *which* field was wrong and what would be acceptable. Returning a
+#: generic "sorry, say that again" makes the model retry the same bad value,
+#: fail identically, and escalate a call that never needed a human.
+#:
+#: Phrased to be spoken. Kept beside the field definitions above so the two
+#: cannot drift apart; `test_validation_guidance_covers_every_field` enforces it.
+FIELD_GUIDANCE: dict[str, str] = {
+    "full_name": "I need your full name as it appears on your PAN card",
+    "date_of_birth": "I need your date of birth, including the year",
+    "pan": (
+        "a PAN is ten characters, five letters then four digits then one letter"
+    ),
+    "code": "the passcode is six digits",
+    "product_code": "I can help with a personal loan or a credit card",
+    "requested_amount": (
+        "the amount needs to be between one thousand and fifty lakh rupees"
+    ),
+    "tenure_months": (
+        "the repayment period needs to be between six months and ten years"
+    ),
+    "declared_monthly_income": "I need your monthly income as a number",
+    "employment_type": (
+        "I need to know if you are salaried, self-employed, or not currently working"
+    ),
+    "consent_type": "I need to record which agreement you are giving",
+    "granted": "I need a clear yes or no",
+    "verbatim_response": "I need to record what you said",
+    "reason_code": "I need a reason for the transfer",
+    "summary": "I need a short summary for my colleague",
+}
+
+
+def validation_message(fields: list[str]) -> str:
+    """Compose a speakable recovery message naming what was wrong.
+
+    Falls back to a generic prompt for fields with no guidance — chiefly
+    `session_id` and `idempotency_key`, which are the platform's business and
+    never something to raise with a caller.
+    """
+    guidance = [FIELD_GUIDANCE[f] for f in fields if f in FIELD_GUIDANCE]
+    if not guidance:
+        return "Sorry, I did not catch that correctly. Could you say it once more?"
+    if len(guidance) == 1:
+        return f"Sorry, {guidance[0]}. Could you give me that again?"
+    joined = "; and ".join(guidance) if len(guidance) == 2 else (
+        ", ".join(guidance[:-1]) + "; and " + guidance[-1]
+    )
+    return f"Sorry, {joined}. Could you give me those again?"
 
 
 class ToolCallView(BaseModel):

@@ -30,11 +30,6 @@ The prompt describes the flow. The service enforces it. A model that skips
 verification and jumps to consent gets a 409 and a recoverable message, not a
 polite reminder.
 
-## Demo
-
-🔊 [Listen to a live call]([assets/voice-agent-demo.mp4](https://github.com/Abhay-J-Kashyap/voice-onboarding-agent/assets/...)) — 1:45, recorded through
-Sarvam Voice Agents against the deployed service.
-
 ## Quick start
 
 ```bash
@@ -178,6 +173,26 @@ automatically.
 Reintroducing the bug drops the suite from 15/15 to 11/15 with 8 failing
 cross-checks — which is the only way to know an eval is worth having.
 
+**A rejection the agent could not act on.** A live call failed when a caller
+asked for a ten year tenure: the schema capped it at seven, and the validation
+handler returned a generic "I did not catch that" naming no field. The agent had
+no way to know *which* value was wrong, retried the same rejected tenure, failed
+identically, and escalated a call that never needed a human. The transcript is a
+textbook avoidable failure — every tool call correct, every decision reasonable,
+and the call still lost.
+
+Two fixes. The ceiling moved to 120 months, because a decade is a real personal
+loan term. More importantly, validation errors now name the offending field and
+its acceptable range in speakable wording — "the repayment period needs to be
+between six months and ten years" — so a recoverable input error is actually
+recoverable. `FIELD_GUIDANCE` sits beside the field definitions it describes,
+and a test fails if a new constrained field arrives without its recovery wording,
+so the gap cannot silently reopen.
+
+The harness gained an assertion type for this: a step can require substrings in
+the spoken message, checking that a response is *actionable* rather than merely
+correctly shaped. Reverting the fix drops the suite to 20/22.
+
 ## Evaluation
 
 `evals/scenarios.py` holds 15 caller personas as data — each one a scripted tool
@@ -191,8 +206,8 @@ then fetches the session record and cross-checks it against what the live calls
 claimed, catching values that are computed and spoken correctly but stored
 wrongly.
 
-Latest run: **19/19 scenarios**, **71/71 audit cross-checks**, p50 4.3ms, p95
-6.0ms across 48 tool calls.
+Latest run: **22/22 scenarios**, **82/82 audit cross-checks**, p50 5.6ms, p95
+7.5ms across 57 tool calls.
 
 Ten scenarios need the service to echo the passcode back, which is only safe
 locally. Run them with `OTP_DEMO_MODE=true`. Against a service without it, those

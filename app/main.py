@@ -19,6 +19,7 @@ from app.db import init_db
 from app.errors import ToolError
 from app.observability import TRACE_ID, TracingMiddleware, configure_logging, log_event
 from app.routers import admin, tools
+from app.schemas import validation_message
 
 settings = get_settings()
 
@@ -74,8 +75,11 @@ async def validation_handler(
 ) -> JSONResponse:
     """Turn schema failures into something the agent can recover from.
 
-    Malformed input usually means the caller was misheard, so the recovery is to
-    ask again — not to abandon the call.
+    Malformed input usually means the caller was misheard or asked for something
+    outside policy. Both are recoverable, but only if the response says *which*
+    field was wrong and what would be acceptable — a generic apology makes the
+    model retry the same rejected value, fail identically, and escalate a call
+    that never needed a human.
     """
     fields = sorted({str(err["loc"][-1]) for err in exc.errors()})
     log_event(
@@ -88,9 +92,7 @@ async def validation_handler(
         status_code=422,
         content={
             "outcome": "retry",
-            "agent_message": (
-                "Sorry, I did not catch that correctly. Could you say it once more?"
-            ),
+            "agent_message": validation_message(fields),
             "data": {"code": "validation_error", "invalid_fields": fields},
             "trace_id": TRACE_ID.get(),
         },

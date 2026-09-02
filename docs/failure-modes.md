@@ -20,7 +20,8 @@ against tool outputs after the call — see "Not yet built" below.
 
 | Failure | Handling |
 | --- | --- |
-| Speech-to-text garbles a PAN | 422 with `outcome: "retry"` and "could you say that once more" — recoverable, not fatal (S13) |
+| Speech-to-text garbles a PAN | 422 with `outcome: "retry"` naming the field and its format, so the agent asks for the right thing (S13) |
+| Caller asks for something outside policy | 422 naming the field and its acceptable range in speakable wording (S21, S22). A generic apology here once cost a live call: the agent retried the rejected value and escalated |
 | PAN spoken with spaces or lower case | Normalised server side; the field accepts the raw utterance and the validator cleans it before checking shape |
 | Name mangled by transcription | Token-overlap match at a 0.5 threshold, with honorifics stripped. Tolerant on name, strict on PAN and date of birth |
 | Caller is a minor, or the date is absurd | Rejected at the schema boundary before any database work |
