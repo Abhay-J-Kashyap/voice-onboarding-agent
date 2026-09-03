@@ -84,6 +84,19 @@ address with no domain verification — which is why it is the channel actually
 used for this project's demo, with SMS built, tested, and ready for a
 deployment that has done the paperwork.
 
+## A guarantee that was never asked for
+
+`OnboardingSession.tool_calls` returned rows in an order nothing had
+requested. SQLite tends to preserve insertion order incidentally; Postgres does
+not, and the first full scenario run against Neon in production reordered two
+calls in an audit record — `verify_otp` ahead of the `verify_identity` that
+must precede it, which is not even a legal sequence, only an artefact of how
+the rows happened to be stored. The fix adds `order_by="ToolCall.id"` to the
+relationship. The regression test inserts two rows, expires the session's
+identity map, and asserts the reload returns them by id — a rerun of the
+original scenario would not have caught this, since SQLite never exhibited the
+bug in the first place.
+
 ## Application link failures
 
 | Failure | Handling |

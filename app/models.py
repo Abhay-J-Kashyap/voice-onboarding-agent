@@ -154,8 +154,16 @@ class OnboardingSession(Base):
     )
 
     customer: Mapped[Customer | None] = relationship()
+    # Explicit ordering, not incidental. SQLite tends to return rows in
+    # insertion order without being asked; Postgres makes no such promise, and
+    # this relationship silently relied on that until the first full run
+    # against Neon reordered two calls in an audit record. Ordering by the
+    # primary key sidesteps timestamp precision entirely rather than trading
+    # one implicit assumption for another.
     tool_calls: Mapped[list[ToolCall]] = relationship(
-        back_populates="session", cascade="all, delete-orphan"
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="ToolCall.id",
     )
 
 

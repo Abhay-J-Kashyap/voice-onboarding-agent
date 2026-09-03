@@ -34,7 +34,51 @@ LEAD_DETAILS = {
 }
 
 
-def test_unknown_pan_is_not_a_verification_failure(client, session_id):
+def test_tool_call_order_is_explicit_not_incidental(client, session_id, db_session):
+    """The audit trail's order is a query guarantee, not a database accident.
+
+    SQLite tends to return unordered results in insertion order without being
+    asked; Postgres makes no such promise. Without an explicit order_by on the
+    relationship, this passed against every local run and reordered two calls
+    the first time it ran against Neon in production. Deleting the calls and
+    reinserting them in reverse id order is what makes this test actually
+    exercise the ordering clause rather than passing by the same accident it
+    is meant to catch.
+    """
+    from app.models import OnboardingSession, ToolCall
+
+    session = db_session.get(OnboardingSession, session_id)
+    first = ToolCall(
+        session_id=session.id,
+        trace_id="t1",
+        tool_name="verify_identity",
+        outcome="ok",
+        latency_ms=1.0,
+        request_digest={},
+        response_digest={},
+    )
+    db_session.add(first)
+    db_session.flush()
+
+    second = ToolCall(
+        session_id=session.id,
+        trace_id="t2",
+        tool_name="verify_otp",
+        outcome="ok",
+        latency_ms=1.0,
+        request_digest={},
+        response_digest={},
+    )
+    db_session.add(second)
+    db_session.flush()
+
+    db_session.expire(session)
+    ordered = [c.tool_name for c in session.tool_calls]
+    assert ordered == ["verify_identity", "verify_otp"]
+    assert first.id < second.id
+
+
+
     response = client.post(
         "/v1/tools/verify_identity",
         json={"session_id": session_id, **UNKNOWN},

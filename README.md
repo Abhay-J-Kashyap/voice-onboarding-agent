@@ -239,8 +239,23 @@ each time the machine grows. `require_live` now rejects only terminal states, an
 a test asserts the property against every state in `ALLOWED_TRANSITIONS`, so the
 next state added either keeps the hand-off or fails the suite.
 
-Three of the five were found by the scenario harness, one by review, and one by a
-real conversation. Each fix generalised past its trigger.
+**A relationship with no explicit order.** `tool_calls` had no `order_by`.
+SQLite tends to return rows in insertion order without being asked, which is
+why every local and CI run looked correct; Postgres makes no such promise, and
+the first full scenario run against Neon in production reordered two calls in
+an audit record. The fix orders by primary key rather than timestamp, which
+sidesteps precision entirely instead of trading one implicit assumption for
+another. The regression test does not merely rerun the scenario — SQLite would
+have passed it too, the same way it always had. It inserts two calls, deletes
+the session's cached relationship, and asserts the reload returns them by id,
+which is the only way to test an ordering guarantee rather than an ordering
+accident.
+
+Four of the six were found by the scenario harness, one by review, and one by a
+real conversation. Each fix generalised past its trigger. The Postgres one is
+the one to remember for an interview: a suite that is fully green against
+SQLite is not evidence a query is correctly ordered, only that it has not yet
+met a database willing to disagree.
 
 ## Evaluation
 
