@@ -13,7 +13,14 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.errors import SessionNotFound
-from app.models import ConsentRecord, EligibilityAssessment, Escalation, OtpChallenge
+from app.models import (
+    ConsentRecord,
+    EligibilityAssessment,
+    Escalation,
+    Lead,
+    OtpChallenge,
+)
+from app.observability import mask_pan
 from app.schemas import EligibilityData, SessionAuditView, ToolCallView
 from app.security import require_api_key
 from app.services.sessions import load_session
@@ -57,6 +64,10 @@ def get_session_audit(
 
     escalation = db.execute(
         select(Escalation).where(Escalation.session_id == session_id)
+    ).scalars().first()
+
+    lead = db.execute(
+        select(Lead).where(Lead.session_id == session_id)
     ).scalars().first()
 
     challenges = db.execute(
@@ -107,6 +118,17 @@ def get_session_audit(
             }
             for c in consents
         ],
+        lead=(
+            {
+                "reference": lead.reference,
+                "product_interest": lead.product_interest,
+                # Masked like every other identifier in this record.
+                "pan": mask_pan(lead.pan),
+                "captured_at": lead.created_at,
+            }
+            if lead
+            else None
+        ),
         escalation=(
             {
                 "ticket_ref": escalation.ticket_ref,

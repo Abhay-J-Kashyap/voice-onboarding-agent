@@ -239,7 +239,37 @@ def check_audit(
                 f"{live_escalation.get('ticket_ref')}/{live_escalation.get('queue')}",
             )
 
-    # 6. No unredacted PAN anywhere in the record. Redaction is a property of
+    # 6. A captured lead is on file with the reference the caller was given.
+    #    Without this, a lead could be spoken into existence and never written —
+    #    the same shape of failure as the instalment that was computed, quoted,
+    #    and stored as zero.
+    live_lead = next(
+        (
+            r["data"]
+            for tool, r in ok_responses
+            if tool == "capture_lead" and r.get("data", {}).get("lead_reference")
+        ),
+        None,
+    )
+    if live_lead is not None:
+        stored = audit.get("lead")
+        if not stored:
+            add("lead_persisted", False, "no lead row in audit record")
+        else:
+            add(
+                "lead_matches_live",
+                stored.get("reference") == live_lead.get("lead_reference"),
+                f"audit {stored.get('reference')} != live "
+                f"{live_lead.get('lead_reference')}",
+            )
+            # A lead must never acquire a credit decision.
+            add(
+                "lead_has_no_eligibility",
+                audit.get("eligibility") is None,
+                "a prospect with no record cannot hold an eligibility decision",
+            )
+
+    # 7. No unredacted PAN anywhere in the record. Redaction is a property of
     #    the stored artefact, not just of the log line that produced it.
     blob = json.dumps(audit)
     leaked = sorted(pan for pan in scenario_pans(scenario) if pan in blob)
@@ -414,6 +444,9 @@ def render_report(results: list[ScenarioResult]) -> str:
         "consent_persisted": "Consent evidence matches what was recorded live",
         "escalation_persisted": "An escalation ticket was written at all",
         "escalation_matches_live": "The caller's ticket reference is the one on file",
+        "lead_persisted": "A captured lead was written at all",
+        "lead_matches_live": "The reference the caller was given is the one on file",
+        "lead_has_no_eligibility": "A prospect never holds a credit decision",
         "no_pan_leak": "No unredacted PAN appears in the stored record",
         "audit_reachable": "The audit endpoint responded",
     }

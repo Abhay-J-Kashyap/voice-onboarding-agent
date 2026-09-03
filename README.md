@@ -105,6 +105,23 @@ channels is deliberately tight — three second timeout, one retry, a worst case
 inside the voice platform's ten second tool timeout, because a customer is on
 the line while it runs.
 
+**An unknown caller is a prospect, not a failure.** A PAN with no matching
+record used to get the same "that does not match our records" as a mismatched
+date — telling a prospective customer they got their own details wrong, and
+burning a verification attempt for something they did not do. The two are now
+distinct outcomes: `retry` for a mismatch, `not_registered` for no account. The
+second opens an acquisition branch that captures a lead and hands off to a
+channel that can actually complete KYC, because a voice call cannot.
+
+Leads live in their own table, never in `customers`. If an unverified person
+were written into the customer table, the next call would find the record, treat
+self-asserted details as established, and send a passcode to an address the
+caller chose — turning "I typed my own email" into "the registered contact
+confirmed it". Separate tables make that impossible rather than discouraged, and
+the state machine keeps the two paths apart in both directions: a prospect can
+never reach a credit decision, and a located record can never be diverted into
+lead capture.
+
 **Server-side state machine.** `SessionState` has an explicit transition table,
 and every tool call passes `require_state`. Escalation is reachable from every
 live state by design — if the agent decides it is out of its depth, the service
@@ -130,7 +147,7 @@ a log line or an audit row, so an unredacted PAN never touches disk.
 verification must not consume an attempt, and a retried hand-off must not open a
 second ticket.
 
-## Three bugs, and what each one changed
+## Five bugs, and what each one changed
 
 Both only appear when calls arrive in quick succession against a real server, so
 the unit tests missed both. They are the most useful thing in this repository.
@@ -193,6 +210,21 @@ The harness gained an assertion type for this: a step can require substrings in
 the spoken message, checking that a response is *actionable* rather than merely
 correctly shaped. Reverting the fix drops the suite to 20/22.
 
+**A new state silently lost escalation.** Adding the prospect branch removed the
+hand-off from it: the escalation endpoint enumerated the states it accepted, and
+the new one was not on the list. A caller who could not be found and then asked
+for a human would have been refused — the one thing the design promises is always
+available.
+
+The fix was not to extend the list. "Escalation is reachable from every live
+state" is an invariant, and encoding it as an enumeration means it breaks quietly
+each time the machine grows. `require_live` now rejects only terminal states, and
+a test asserts the property against every state in `ALLOWED_TRANSITIONS`, so the
+next state added either keeps the hand-off or fails the suite.
+
+Three of the five were found by the scenario harness, one by review, and one by a
+real conversation. Each fix generalised past its trigger.
+
 ## Evaluation
 
 `evals/scenarios.py` holds 15 caller personas as data — each one a scripted tool
@@ -206,8 +238,8 @@ then fetches the session record and cross-checks it against what the live calls
 claimed, catching values that are computed and spoken correctly but stored
 wrongly.
 
-Latest run: **22/22 scenarios**, **82/82 audit cross-checks**, p50 5.6ms, p95
-7.5ms across 57 tool calls.
+Latest run: **25/25 scenarios**, **92/92 audit cross-checks**, p50 5.0ms, p95
+7.9ms across 63 tool calls.
 
 Ten scenarios need the service to echo the passcode back, which is only safe
 locally. Run them with `OTP_DEMO_MODE=true`. Against a service without it, those
@@ -241,14 +273,15 @@ app/
     email.py           email delivery; console and Resend implementations
     eligibility.py     credit policy engine
     handoff.py         consent records, escalation routing
+    leads.py           prospective customers, kept apart from customers
   routers/
-    tools.py           the six agent-facing tools
+    tools.py           the seven agent-facing tools
     admin.py           health checks, session audit
 agent/
-  system_prompt.md     the Sarvam agent prompt
+  sarvam_instruction.txt  the Sarvam agent instruction, paste as-is
   tools.json           live-action tool schemas
 evals/
-  scenarios.py         15 personas as data
+  scenarios.py         25 personas as data
   run_evals.py         runner and report generator
   rubric.md            manual conversational scoring
 docs/
@@ -271,8 +304,8 @@ and no PII retention policy. Each has a stated fix.
 
 1. Deploy this service somewhere with a public HTTPS URL.
 2. Create a blank agent in the Sarvam Voice Agents console.
-3. Paste `agent/system_prompt.md` into the prompt field.
-4. Register the six tools from `agent/tools.json` as live actions, with the API
+3. Paste `agent/sarvam_instruction.txt` into the Instruction field.
+4. Register the seven tools from `agent/tools.json` as live actions, with the API
    key in the header and the platform's call id forwarded as `x-trace-id` so
    telephony and tool logs share one identifier.
 5. Place a test call, then `GET /v1/sessions/{id}` to see exactly what happened.

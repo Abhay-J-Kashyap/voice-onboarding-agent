@@ -22,6 +22,7 @@ from app.errors import AttemptsExhausted
 from app.models import EligibilityAssessment, SessionState
 from app.observability import SESSION_ID, TRACE_ID, log_event, mask_pan
 from app.schemas import (
+    CaptureLeadRequest,
     CheckEligibilityRequest,
     EscalateRequest,
     RecordConsentRequest,
@@ -34,7 +35,7 @@ from app.schemas import (
 )
 from app.security import require_api_key
 from app.services import eligibility as eligibility_service
-from app.services import handoff, kyc, sessions
+from app.services import handoff, kyc, leads, sessions
 from app.services import otp as otp_service
 
 router = APIRouter(
@@ -238,6 +239,22 @@ def verify_identity(
         response = _passcode_response(issued, session, first_issue=True)
         if issued.outcome is otp_service.IssueOutcome.SENT:
             response.data["customer_reference"] = f"CUST-{result.customer.id:06d}"
+    elif result.failure_reason == "pan_not_found":
+        # Not a failed verification: there is simply no account here. This does
+        # not consume an attempt, because the caller has done nothing wrong and
+        # blocking a prospective customer for "failing" three times would be
+        # both hostile and commercially absurd.
+        sessions.transition(session, SessionState.PROSPECT)
+        response = ToolResponse(
+            outcome="not_registered",
+            agent_message=(
+                "I could not find an existing account with those details. "
+                "I can take a few details and get an application started for "
+                "you, if you would like."
+            ),
+            session_state=session.state,
+            data={"registered": False},
+        )
     else:
         session.identity_attempts += 1
         remaining = settings.max_identity_attempts - session.identity_attempts
@@ -384,6 +401,69 @@ def resend_otp(
         response=response,
         started=started,
         request_digest={"issue_outcome": issued.outcome.value},
+        idempotency_key=payload.idempotency_key,
+    )
+
+
+@router.post("/tools/capture_lead", response_model=ToolResponse)
+def capture_lead(
+    payload: CaptureLeadRequest, db: Session = Depends(get_db)
+) -> ToolResponse:
+    """Record a prospective customer's stated details for follow-up.
+
+    Reachable only from `prospect`, which is only reachable when no account
+    exists. The state machine is what stops this being used to bypass
+    verification: an existing customer can never reach it, and a prospect can
+    never reach eligibility.
+    """
+    started = time.perf_counter()
+    session = sessions.load_session(db, payload.session_id)
+    SESSION_ID.set(session.id)
+
+    replay = sessions.find_replayed_call(
+        db, session.id, "capture_lead", payload.idempotency_key
+    )
+    if replay is not None:
+        log_event("tool_call_replayed", tool="capture_lead", session_id=session.id)
+        return ToolResponse(**replay.response_digest, trace_id=TRACE_ID.get())
+
+    sessions.require_state(session, SessionState.PROSPECT, tool="capture_lead")
+
+    lead = leads.create_lead(
+        db,
+        session=session,
+        full_name=payload.full_name,
+        date_of_birth=payload.date_of_birth.isoformat(),
+        pan=payload.pan,
+        email=payload.email,
+        phone=payload.phone,
+        product_interest=payload.product_interest,
+        stated_monthly_income=payload.stated_monthly_income,
+    )
+    sessions.transition(session, SessionState.LEAD_CAPTURED)
+
+    response = ToolResponse(
+        outcome="ok",
+        agent_message=(
+            "Thank you, I have those details. Your reference is "
+            f"{lead.reference}. We will email you a secure link to finish the "
+            "identity checks, and someone will follow up shortly."
+        ),
+        session_state=session.state,
+        data={"lead_reference": lead.reference},
+    )
+
+    return _finalize(
+        db,
+        session=session,
+        tool_name="capture_lead",
+        response=response,
+        started=started,
+        # Redacted like every other audit digest.
+        request_digest={
+            "pan": mask_pan(payload.pan),
+            "product_interest": payload.product_interest,
+        },
         idempotency_key=payload.idempotency_key,
     )
 
@@ -570,14 +650,9 @@ def escalate(payload: EscalateRequest, db: Session = Depends(get_db)) -> ToolRes
         log_event("tool_call_replayed", tool="escalate", session_id=session.id)
         return ToolResponse(**replay.response_digest, trace_id=TRACE_ID.get())
 
-    sessions.require_state(
-        session,
-        SessionState.STARTED,
-        SessionState.IDENTITY_VERIFIED,
-        SessionState.ELIGIBILITY_ASSESSED,
-        SessionState.CONSENT_RECORDED,
-        tool="escalate",
-    )
+    # Every live state, expressed as an invariant rather than a list — see
+    # require_live. Escalation must never be the thing that is unavailable.
+    sessions.require_live(session, tool="escalate")
 
     escalation = handoff.create_escalation(
         db, session=session, reason_code=payload.reason_code, summary=payload.summary

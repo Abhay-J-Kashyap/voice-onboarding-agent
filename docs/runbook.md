@@ -25,11 +25,31 @@ curl -s -H "x-api-key: $API_KEY" \
   https://<host>/v1/sessions/<session_id> | jq .
 ```
 
-The audit response gives the tool sequence in order, per-call latency, the
-eligibility decision with its reasons and policy version, consent records, and
-any escalation ticket.
+The audit response gives the tool sequence in order, per-call latency, passcode
+challenges (issued, attempted, consumed — never the code itself), the eligibility
+decision with its reasons and policy version, consent records, any lead, and any
+escalation ticket.
 
 ## Common alerts
+
+**Passcode delivery failing.**
+Filter for `sms_dispatch_failed` or `email_dispatch_failed`. A 4xx status means
+configuration — a bad key, an unverified recipient, an unapproved template — and
+will not resolve on its own. Timeouts mean the provider is slow or down; the
+service retries once and then routes callers to a human, so a sustained outage
+shows up as a rise in `technical_failure` escalations rather than as silence.
+
+**Passcode rate limits tripping.**
+`issue_outcome: rate_limited` in the `tool_call` digest means a customer hit the
+per-customer issuance cap. Expected during testing against the same seed record;
+in production a cluster of these against one customer is worth investigating as
+either a retry storm or an attempt to use the agent to flood someone's phone.
+
+**Lead capture rate.**
+A rise in `not_registered` outcomes is commercially interesting rather than
+alarming — it means callers without accounts are reaching the agent. A sudden
+spike from one source is different, and should be read as PAN enumeration until
+shown otherwise.
 
 **Verification failure rate climbing.**
 Filter for `"message": "tool_call"` with `tool: verify_identity` and
@@ -56,6 +76,28 @@ Always a bug. The caller received a generic message and the agent should have
 escalated. Pull the `trace_id`, reproduce against the audit record, and add a
 scenario to `evals/scenarios.py` before fixing.
 
+## Changing passcode policy
+
+Every limit is in `Settings`: length, lifetime, verification attempts, resends,
+and the per-customer issuance window. Change them by environment variable, not
+in code, and remember the caller experiences the sum of them — a short lifetime
+with a low resend cap makes a slow caller unservable.
+
+`OTP_DEMO_MODE` must be false anywhere real. It returns the passcode in the tool
+response so a demo can run without a provider; it is not a debugging aid.
+
+## Changing the delivery channel
+
+`OTP_DELIVERY_CHANNEL` selects `sms` or `email`. Switching to SMS in India needs
+DLT registration completed first — principal entity, sender id, and an approved
+template whose variables match `var_code` and `var_ttl`. Switching to a real
+email provider needs `EMAIL_PROVIDER=resend` and a key; note that Resend's
+sandbox sender only delivers to the account holder's own address, so seeded
+records with placeholder addresses will fail with `delivery_failed`.
+
+Both misconfigurations fail loudly at startup rather than silently on the first
+customer call.
+
 ## Changing credit policy
 
 1. Edit the rules in `app/services/eligibility.py`.
@@ -78,6 +120,26 @@ The service is stateless apart from the database. Redeploy the previous image.
 Schema changes are additive so far, so a rollback does not require a data
 migration — this stops being true as soon as a column is dropped or renamed, at
 which point Alembic and a two-phase deploy become mandatory.
+
+## Schema changes
+
+`create_all` does not alter existing tables. Three additions so far — the
+passcode table, the customer email column, the leads table — have each needed
+manual repair on a database that outlived them.
+
+`seed()` backfills fields that are unset on existing rows, which covers new
+columns without a wipe. For a genuinely broken schema, a one-off reset is
+available:
+
+```
+python -c "from app.seed import seed; print('Seeded', seed(reset=True))"
+```
+
+That deletes every customer row. It does not touch sessions or audit records, but
+those reference customers, so treat it as destructive and revert the start
+command afterwards.
+
+This is a workaround for the absence of migrations, not a substitute for them.
 
 ## Before running more than one instance
 

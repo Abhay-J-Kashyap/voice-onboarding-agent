@@ -40,6 +40,14 @@ class SessionState(enum.StrEnum):
     """
 
     STARTED = "started"
+    #: No record exists for this PAN. The caller is not a failed customer, they
+    #: are a prospective one, and the call becomes an acquisition conversation
+    #: rather than a servicing one.
+    PROSPECT = "prospect"
+    #: Details captured for follow-up through a channel that can actually
+    #: complete KYC. This is as far as a voice call can legitimately take an
+    #: unknown person.
+    LEAD_CAPTURED = "lead_captured"
     #: Record located and the caller knows its details. A knowledge factor only:
     #: anyone holding a photocopy of the PAN card gets this far.
     IDENTITY_MATCHED = "identity_matched"
@@ -57,9 +65,16 @@ class SessionState(enum.StrEnum):
 ALLOWED_TRANSITIONS: dict[SessionState, set[SessionState]] = {
     SessionState.STARTED: {
         SessionState.IDENTITY_MATCHED,
+        SessionState.PROSPECT,
         SessionState.ESCALATED,
         SessionState.BLOCKED,
     },
+    SessionState.PROSPECT: {
+        SessionState.LEAD_CAPTURED,
+        SessionState.ESCALATED,
+        SessionState.BLOCKED,
+    },
+    SessionState.LEAD_CAPTURED: set(),
     SessionState.IDENTITY_MATCHED: {
         SessionState.IDENTITY_VERIFIED,
         SessionState.ESCALATED,
@@ -84,6 +99,7 @@ ALLOWED_TRANSITIONS: dict[SessionState, set[SessionState]] = {
 
 TERMINAL_STATES = {
     SessionState.COMPLETED,
+    SessionState.LEAD_CAPTURED,
     SessionState.ESCALATED,
     SessionState.BLOCKED,
 }
@@ -196,6 +212,36 @@ class OtpChallenge(Base):
         DateTime(timezone=True), nullable=False
     )
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
+class Lead(Base):
+    """A prospective customer captured on a call.
+
+    Deliberately separate from `customers`: a lead has stated their details but
+    nobody has verified them. Writing an unverified person into the customer
+    table would let the next call treat self-asserted details as an established
+    record, which is precisely the confusion this table exists to prevent.
+    """
+
+    __tablename__ = "leads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    reference: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("onboarding_sessions.id"), nullable=False, index=True
+    )
+    full_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    date_of_birth: Mapped[str] = mapped_column(String(10), nullable=False)
+    pan: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    phone: Mapped[str | None] = mapped_column(String(20))
+    product_interest: Mapped[str] = mapped_column(String(40), nullable=False)
+    #: What the caller said they earn. Unverified by definition — no record
+    #: exists to check it against — so it informs follow-up, never a decision.
+    stated_monthly_income: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )

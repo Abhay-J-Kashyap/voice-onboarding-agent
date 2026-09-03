@@ -84,6 +84,18 @@ address with no domain verification — which is why it is the channel actually
 used for this project's demo, with SMS built, tested, and ready for a
 deployment that has done the paperwork.
 
+## An accepted trade-off: the enumeration oracle
+
+Distinguishing `not_registered` from `retry` is a deliberate information leak.
+Before, every failure looked alike; now a caller can learn whether a given PAN
+belongs to a customer. That is a real enumeration oracle, and it is the price of
+not telling genuine prospects they got their own details wrong.
+
+The mitigation is rate limiting on `verify_identity`, which is listed below as
+outstanding. Until that exists, this endpoint should not be considered safe
+against a determined attacker holding a valid platform key — the leak is
+accepted knowingly, not overlooked.
+
 ## Known gaps
 
 Listed rather than hidden, because a reviewer will find them anyway.

@@ -3,20 +3,15 @@
 Each row exists to exercise a specific branch of the policy, so the eval
 personas in `evals/` map one-to-one onto these records. Run with:
 
-    python -m app.seed"""
-    
+    python -m app.seed
+"""
+
 from __future__ import annotations
 
 from sqlalchemy import select
 
 from app.db import SessionLocal, init_db
 from app.models import Customer
-
-"""important note: below are only dummy emails. 
-if you want real time otp verification using resend 
-or any other email otp provider, put the real email id below in the records 
-and change "EMAIL_PROVIDER" environment variable to 'resend' or whatever the 
-name of your email otp provider is."""
 
 # All PANs are syntactically valid but deliberately fictitious.
 SEED_CUSTOMERS: list[dict] = [

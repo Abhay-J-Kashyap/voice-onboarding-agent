@@ -19,7 +19,7 @@
   "tools": [
     {
       "name": "verify_identity",
-      "description": "Look up the caller's record and send a passcode to their registered mobile. Call this before anything else. Returns 'otp_sent' when the record was found and a code is on its way, 'retry' when the details did not match and an attempt remains, or 'blocked' when no attempts remain or the caller cannot be served over the phone. Note that 'otp_sent' does NOT mean the caller is verified.",
+      "description": "Look up the caller's record and send a passcode to their registered contact. Call this before anything else. Returns 'otp_sent' when the record was found and a code is on its way, 'not_registered' when no account exists for that PAN (the caller is a prospect, not a failed customer), 'retry' when details did not match and an attempt remains, or 'blocked' when no attempts remain. 'otp_sent' does NOT mean the caller is verified.",
       "method": "POST",
       "path": "/v1/tools/verify_identity",
       "parameters": {
@@ -93,6 +93,61 @@
         "properties": {
           "session_id": {
             "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "capture_lead",
+      "description": "Record a prospective customer's details for follow-up. Only valid after verify_identity returned 'not_registered'. These details are self-asserted and unverified, so this creates a lead for follow-up, never an application or a credit decision.",
+      "method": "POST",
+      "path": "/v1/tools/capture_lead",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "full_name",
+          "date_of_birth",
+          "pan",
+          "email"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "full_name": {
+            "type": "string",
+            "description": "Full name as the caller says it."
+          },
+          "date_of_birth": {
+            "type": "string",
+            "description": "Date of birth as YYYY-MM-DD."
+          },
+          "pan": {
+            "type": "string",
+            "description": "PAN as spoken; spaces and case are normalised."
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address to send the application link to."
+          },
+          "phone": {
+            "type": "string",
+            "description": "Optional mobile number."
+          },
+          "product_interest": {
+            "type": "string",
+            "enum": [
+              "personal_loan",
+              "credit_card"
+            ]
+          },
+          "stated_monthly_income": {
+            "type": "integer",
+            "description": "Optional. Monthly income in rupees as stated."
           },
           "idempotency_key": {
             "type": "string"

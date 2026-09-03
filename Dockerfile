@@ -26,4 +26,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c "import httpx,sys; sys.exit(0 if httpx.get('http://localhost:8000/healthz', timeout=2).status_code==200 else 1)"
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Seed before serving so a fresh volume has reference data, and so an existing
+# one gets new columns backfilled. This is standing in for migrations; see
+# docs/runbook.md.
+CMD ["sh", "-c", "python -m app.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

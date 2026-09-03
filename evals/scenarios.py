@@ -72,6 +72,12 @@ IMRAN = {
     "date_of_birth": "1991-07-21",
     "pan": "CDEFG3456H",
 }
+#: Syntactically valid, deliberately absent from the customer table.
+UNKNOWN_CALLER = {
+    "full_name": "Kavya Reddy",
+    "date_of_birth": "1992-08-14",
+    "pan": "ZZZZZ9999Z",
+}
 VIKRAM = {
     "full_name": "Vikram Anand",
     "date_of_birth": "1979-09-15",
@@ -429,6 +435,73 @@ SCENARIOS: list[Scenario] = [
                     "reason_code": "customer_requested_human",
                     "summary": "Caller asked for a person.",
                     "idempotency_key": "esc-1",
+                },
+                "ok",
+                "escalated",
+            ),
+        ],
+    ),
+    Scenario(
+        id="S23",
+        persona="Caller has no account with us",
+        intent=(
+            "An unknown PAN is a prospect, not a failed customer, and must not "
+            "burn a verification attempt."
+        ),
+        steps=[
+            Step(
+                "verify_identity",
+                UNKNOWN_CALLER,
+                "not_registered",
+                "prospect",
+                {"registered": False},
+            ),
+            Step(
+                "capture_lead",
+                {
+                    "full_name": "Kavya Reddy",
+                    "date_of_birth": "1992-08-14",
+                    "pan": "ZZZZZ9999Z",
+                    "email": "kavya.reddy@example.com",
+                    "product_interest": "personal_loan",
+                    "stated_monthly_income": 70_000,
+                },
+                "ok",
+                "lead_captured",
+            ),
+        ],
+    ),
+    Scenario(
+        id="S24",
+        persona="Model treats a prospect as a customer",
+        intent="No record means no bureau data and no basis for a decision.",
+        steps=[
+            Step("verify_identity", UNKNOWN_CALLER, "not_registered", "prospect"),
+            Step(
+                "check_eligibility",
+                {
+                    "product_code": "personal_loan",
+                    "requested_amount": 300_000,
+                    "tenure_months": 36,
+                    "declared_monthly_income": 70_000,
+                    "employment_type": "salaried",
+                },
+                "rejected",
+                expect_status=409,
+            ),
+        ],
+    ),
+    Scenario(
+        id="S25",
+        persona="Prospect asks for a human before giving details",
+        intent="Escalation must remain available from the acquisition path too.",
+        steps=[
+            Step("verify_identity", UNKNOWN_CALLER, "not_registered", "prospect"),
+            Step(
+                "escalate",
+                {
+                    "reason_code": "customer_requested_human",
+                    "summary": "Prospect wanted to speak to someone.",
                 },
                 "ok",
                 "escalated",

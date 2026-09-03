@@ -25,8 +25,20 @@ PAN_PATTERN = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 #: `otp_sent` is distinct from `ok` so the model cannot mistake a located record
 #: for a verified caller — the two mean very different things.
 Outcome = Literal[
-    "ok", "otp_sent", "retry", "declined", "rejected", "blocked", "error"
+    "ok",
+    "otp_sent",
+    # No account exists for this PAN. Distinct from `retry` because the caller
+    # did nothing wrong — they are a prospect, not a failed customer, and the
+    # conversation should turn into acquisition rather than another attempt.
+    "not_registered",
+    "retry",
+    "declined",
+    "rejected",
+    "blocked",
+    "error",
 ]
+
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class ToolResponse(BaseModel):
@@ -99,6 +111,56 @@ class VerifyOtpRequest(BaseModel):
 class ResendOtpRequest(BaseModel):
     session_id: str
     idempotency_key: str | None = Field(default=None, max_length=64)
+
+
+class CaptureLeadRequest(BaseModel):
+    """Details stated by someone with no existing account.
+
+    Every field here is self-asserted. Nothing in this request has been checked
+    against anything, which is why it produces a lead for follow-up and never a
+    credit decision.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    session_id: str
+    full_name: str = Field(min_length=2, max_length=120)
+    date_of_birth: date
+    pan: str = Field(min_length=10, max_length=30)
+    email: str = Field(min_length=5, max_length=255)
+    phone: str | None = Field(default=None, max_length=20)
+    product_interest: Literal["personal_loan", "credit_card"] = "personal_loan"
+    stated_monthly_income: int | None = Field(default=None, gt=0, le=10_000_000)
+    idempotency_key: str | None = Field(default=None, max_length=64)
+
+    @field_validator("pan")
+    @classmethod
+    def normalise_pan(cls, value: str) -> str:
+        candidate = "".join(c for c in value if c.isalnum()).upper()
+        if not PAN_PATTERN.match(candidate):
+            raise ValueError("PAN must match five letters, four digits, one letter")
+        return candidate
+
+    @field_validator("email")
+    @classmethod
+    def check_email(cls, value: str) -> str:
+        candidate = value.replace(" ", "").lower()
+        if not EMAIL_PATTERN.match(candidate):
+            raise ValueError("email address is not valid")
+        return candidate
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def must_be_adult(cls, value: date) -> date:
+        today = date.today()
+        age = today.year - value.year - (
+            (today.month, today.day) < (value.month, value.day)
+        )
+        if age < 18:
+            raise ValueError("applicant must be at least 18 years old")
+        if age > 100:
+            raise ValueError("date of birth is out of the accepted range")
+        return value
 
 
 class CheckEligibilityRequest(BaseModel):
@@ -177,6 +239,10 @@ FIELD_GUIDANCE: dict[str, str] = {
     "consent_type": "I need to record which agreement you are giving",
     "granted": "I need a clear yes or no",
     "verbatim_response": "I need to record what you said",
+    "email": "I need an email address I can send your application link to",
+    "phone": "I need a mobile number, ten digits",
+    "product_interest": "I can help with a personal loan or a credit card",
+    "stated_monthly_income": "I need your monthly income as a number",
     "reason_code": "I need a reason for the transfer",
     "summary": "I need a short summary for my colleague",
 }
@@ -224,3 +290,4 @@ class SessionAuditView(BaseModel):
     eligibility: EligibilityData | None
     consents: list[dict[str, Any]]
     escalation: dict[str, Any] | None
+    lead: dict[str, Any] | None = None

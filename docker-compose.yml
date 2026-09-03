@@ -7,6 +7,11 @@ services:
       ENVIRONMENT: docker
       API_KEY: ${API_KEY:-local-dev-key}
       DATABASE_URL: sqlite:////srv/data/kyc_agent.db
+      # Defaults match `make run`: console delivery, passcode echoed so the
+      # evaluation suite can drive the two-factor scenarios. Override both for
+      # anything resembling a real deployment.
+      OTP_DELIVERY_CHANNEL: ${OTP_DELIVERY_CHANNEL:-sms}
+      OTP_DEMO_MODE: ${OTP_DEMO_MODE:-true}
     volumes:
       - kyc-data:/srv/data
 

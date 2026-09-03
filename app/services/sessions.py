@@ -85,6 +85,22 @@ def require_state(
         )
 
 
+def require_live(session: OnboardingSession, *, tool: str) -> None:
+    """Reject only if the session has already closed.
+
+    Used by escalation, which must work from *every* live state. Enumerating the
+    permitted states there is a latent bug: adding a state to the machine
+    silently removes the hand-off from it, and the failure only shows up when a
+    caller in that state asks for a human and does not get one.
+    """
+    if session.state in TERMINAL_STATES:
+        raise SessionClosed(
+            "This application has already been closed and passed to a colleague.",
+            tool=tool,
+            state=session.state.value,
+        )
+
+
 def transition(session: OnboardingSession, target: SessionState) -> None:
     """Move the session forward, refusing edges the state machine does not define."""
     if target not in ALLOWED_TRANSITIONS[session.state]:

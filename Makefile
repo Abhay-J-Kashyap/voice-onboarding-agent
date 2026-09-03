@@ -1,4 +1,4 @@
-.PHONY: install seed run test lint evals docker clean
+.PHONY: install seed run run-email test lint evals check docker clean
 
 install:
 	pip install -r requirements-dev.txt
@@ -6,12 +6,18 @@ install:
 seed:
 	python -m app.seed
 
+# Demo mode is on locally so the passcode appears in the tool response and the
+# full evaluation suite can run. Never enable it in a deployed service.
 run: seed
-	OTP_DEMO_MODE=true python -m uvicorn app.main:app --reload --port 8000
+	OTP_DEMO_MODE=true uvicorn app.main:app --reload --port 8000
+
+# The other delivery channel. CI runs the evaluation suite against both, so it
+# is worth being able to reproduce either locally.
+run-email: seed
+	OTP_DEMO_MODE=true OTP_DELIVERY_CHANNEL=email uvicorn app.main:app --reload --port 8000
 
 test:
-	python -m pytest -q
-
+	pytest -q
 
 lint:
 	ruff check app tests evals
@@ -19,6 +25,9 @@ lint:
 # Requires the service to be running on --base-url.
 evals:
 	python -m evals.run_evals --base-url http://localhost:8000 --json evals/report.json
+
+# What CI runs, minus the service lifecycle. Use before pushing.
+check: lint test
 
 docker:
 	docker compose up --build
