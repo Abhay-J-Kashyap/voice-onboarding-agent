@@ -48,6 +48,51 @@ through Sarvam, and a browser opening the link that call emailed. Purple is the
 call path, teal is the web path — they only ever meet inside the service and at
 the database, never directly.
 
+What each call is actually allowed to do next is enforced by a state machine,
+not by the prompt:
+
+```mermaid
+stateDiagram-v2
+    [*] --> started
+
+    started --> identity_matched : verify_identity — record found
+    started --> prospect : verify_identity — not_registered
+    started --> blocked : attempts exhausted / sanctioned
+    started --> escalated
+
+    identity_matched --> identity_verified : verify_otp — correct
+    identity_matched --> blocked : otp attempts exhausted
+    identity_matched --> escalated
+
+    identity_verified --> eligibility_assessed : check_eligibility
+    identity_verified --> escalated
+
+    eligibility_assessed --> consent_recorded : record_consent
+    eligibility_assessed --> escalated
+
+    consent_recorded --> completed
+    consent_recorded --> escalated
+
+    prospect --> lead_captured : capture_lead
+    prospect --> blocked
+    prospect --> escalated
+
+    completed --> [*]
+    lead_captured --> [*]
+    blocked --> [*]
+    escalated --> [*]
+```
+
+Every live state has an edge into `escalated` — drawn deliberately, because that
+property broke once. When `prospect` was added, the escalation endpoint
+enumerated its permitted states and silently lost the edge from the new one; a
+caller with no account who then asked for a human would have been refused. It's
+now an invariant (`require_live` rejects only terminal states) rather than a
+list, and a test asserts the property against every state in the machine so the
+next one added can't lose it the same way. Full rationale, including why
+`identity_matched` and `identity_verified` are drawn as genuinely different
+states, is in [`docs/architecture.md`](docs/architecture.md#the-state-machine).
+
 ## The idea
 
 A voice agent that only talks is a demo. One that completes work has to be
