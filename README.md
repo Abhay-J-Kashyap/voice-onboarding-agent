@@ -122,6 +122,23 @@ the state machine keeps the two paths apart in both directions: a prospect can
 never reach a credit decision, and a located record can never be diverted into
 lead capture.
 
+**The call hands off to the web, and the handoff is the hard part.** A voice
+call cannot complete KYC — documents need a channel that can show them. So
+capturing a lead also issues a signed link, emails it, and leaves the applicant
+able to finish later. The token is 32 random bytes, stored as an unsalted
+SHA-256 digest (salt defends low-entropy secrets like the six-digit passcode;
+here it would only prevent the lookup), expires in 48 hours, and is retired in
+the same transaction as the submission it authorised.
+
+Expired, already-used and never-existed links render the identical page. An
+applicant gains nothing from the distinction, and someone probing tokens would
+gain a way to tell a real one from a guess. A validation error re-renders the
+form with the applicant's own answers still in it and does *not* spend the
+link — a form that empties itself is how a real application gets abandoned.
+Email delivery failing does not fail the call either: the lead is the durable
+record, the link is a convenience on top of it, and the agent falls back to
+promising a human will follow up.
+
 **Server-side state machine.** `SessionState` has an explicit transition table,
 and every tool call passes `require_state`. Escalation is reachable from every
 live state by design — if the agent decides it is out of its depth, the service
@@ -268,14 +285,17 @@ app/
   services/
     sessions.py        state guards, idempotency, audit
     kyc.py             identity matching
+    links.py           application link issuance, expiry, single use
     otp.py             passcode issuance, verification, rate limiting
     sms.py             SMS delivery; console and MSG91 implementations
     email.py           email delivery; console and Resend implementations
     eligibility.py     credit policy engine
     handoff.py         consent records, escalation routing
     leads.py           prospective customers, kept apart from customers
+  templates.py       the two HTML pages an applicant sees
   routers/
     tools.py           the seven agent-facing tools
+    application.py     public, token-authenticated web routes
     admin.py           health checks, session audit
 agent/
   sarvam_instruction.txt  the Sarvam agent instruction, paste as-is

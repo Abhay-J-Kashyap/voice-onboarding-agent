@@ -84,6 +84,21 @@ address with no domain verification — which is why it is the channel actually
 used for this project's demo, with SMS built, tested, and ready for a
 deployment that has done the paperwork.
 
+## Application link failures
+
+| Failure | Handling |
+| --- | --- |
+| Email bounces or the provider is down | The lead still stands; the agent promises a human follow-up instead of claiming the application failed |
+| Applicant mistypes a field | Form re-renders with their answers intact and the link is *not* spent |
+| Link forwarded to someone else | Possession is the credential, and that is the accepted trade for not asking someone to invent a password mid-application. Expiry and single use bound the exposure |
+| Link clicked after 48 hours | Same page as any other dead link, with a phone number to get a fresh one |
+| Someone probes tokens | Every rejection renders identically, so a real token cannot be told from a guess |
+| Applicant submits twice | The link is consumed in the same transaction as the submission, so the second attempt finds it spent |
+| Caller-chosen text in the page | Every interpolated value is escaped; name and email came from someone speaking into a phone |
+
+The page sends `no-store` and `no-referrer`, because the URL is the credential
+and must not reach an intermediary cache or a third-party Referer header.
+
 ## An accepted trade-off: the enumeration oracle
 
 Distinguishing `not_registered` from `retry` is a deliberate information leak.

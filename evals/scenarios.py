@@ -468,6 +468,10 @@ SCENARIOS: list[Scenario] = [
                 },
                 "ok",
                 "lead_captured",
+                # The link is what turns a captured lead into an application
+                # the prospect can actually finish.
+                {"link_emailed": True},
+                expect_message_contains=["emailed you a secure link"],
             ),
         ],
     ),

@@ -11,6 +11,7 @@ makes the policy testable without standing up HTTP.
 
 from __future__ import annotations
 
+import logging
 import time
 
 from fastapi import APIRouter, Depends
@@ -35,8 +36,9 @@ from app.schemas import (
 )
 from app.security import require_api_key
 from app.services import eligibility as eligibility_service
-from app.services import handoff, kyc, leads, sessions
+from app.services import handoff, kyc, leads, links, sessions
 from app.services import otp as otp_service
+from app.services.email import get_email_sender
 
 router = APIRouter(
     prefix="/v1",
@@ -442,15 +444,47 @@ def capture_lead(
     )
     sessions.transition(session, SessionState.LEAD_CAPTURED)
 
+    # The lead is the durable record; the link is a convenience on top of it.
+    # If delivery fails, the lead still stands and a human can follow up, so the
+    # call ends successfully either way — telling a caller their application
+    # failed because an email bounced would be both wrong and alarming.
+    link, token = links.issue_link(db, session=session, lead=lead)
+    delivered = get_email_sender().send_application_link(
+        email=lead.email,
+        full_name=lead.full_name,
+        reference=lead.reference,
+        url=links.build_url(token),
+    )
+    if not delivered:
+        log_event(
+            "application_link_delivery_failed",
+            level=logging.WARNING,
+            session_id=session.id,
+            reference=lead.reference,
+        )
+
+    if delivered:
+        closing = (
+            "We have emailed you a secure link to finish the identity checks."
+        )
+    else:
+        closing = (
+            "One of my colleagues will be in touch shortly to finish the "
+            "identity checks."
+        )
+
     response = ToolResponse(
         outcome="ok",
         agent_message=(
-            "Thank you, I have those details. Your reference is "
-            f"{lead.reference}. We will email you a secure link to finish the "
-            "identity checks, and someone will follow up shortly."
+            f"Thank you, I have those details. Your reference is "
+            f"{lead.reference}. {closing}"
         ),
         session_state=session.state,
-        data={"lead_reference": lead.reference},
+        data={
+            "lead_reference": lead.reference,
+            "link_emailed": delivered,
+            "link_expires_at": link.expires_at.isoformat(),
+        },
     )
 
     return _finalize(

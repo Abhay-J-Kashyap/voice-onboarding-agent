@@ -8,3 +8,5 @@ alembic==1.19.1
 # Postgres driver. The binary wheel avoids needing libpq and a compiler in the
 # build image; swap for plain psycopg to link against the system libpq instead.
 psycopg[binary]==3.3.5
+# Required by FastAPI to parse HTML form submissions.
+python-multipart==0.0.20

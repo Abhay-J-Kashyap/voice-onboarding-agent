@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from app.config import get_settings
 from app.errors import ToolError
 from app.observability import TRACE_ID, TracingMiddleware, configure_logging, log_event
-from app.routers import admin, tools
+from app.routers import admin, application, tools
 from app.schemas import validation_message
 
 settings = get_settings()
@@ -49,6 +49,8 @@ app = FastAPI(
 app.add_middleware(TracingMiddleware)
 app.include_router(admin.router)
 app.include_router(tools.router)
+# Public, token-authenticated HTML. Not behind the platform API key.
+app.include_router(application.router)
 
 
 @app.exception_handler(ToolError)
