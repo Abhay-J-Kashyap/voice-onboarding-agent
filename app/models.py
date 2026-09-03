@@ -247,6 +247,66 @@ class Lead(Base):
     )
 
 
+class ApplicationLink(Base):
+    """A one-time link emailed to a prospect so they can finish on the web.
+
+    The token is hashed before storage, but unlike a passcode it is *not*
+    salted. That is deliberate rather than an oversight: a salt defends a
+    low-entropy secret against precomputation, which is why the six-digit
+    passcode has one. This token is 32 random bytes, so precomputation is not a
+    threat, and an unsalted digest is what makes lookup-by-token possible at
+    all — with a per-row salt there would be nothing to look up by.
+
+    Possession of the link is the only credential. That is the accepted trade
+    for not asking someone to invent a password mid-application, and it is why
+    the link expires and why it stops working once used.
+    """
+
+    __tablename__ = "application_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token_digest: Mapped[str] = mapped_column(
+        String(64), unique=True, nullable=False, index=True
+    )
+    lead_id: Mapped[int] = mapped_column(
+        ForeignKey("leads.id"), nullable=False, index=True
+    )
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("onboarding_sessions.id"), nullable=False, index=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
+class ApplicationSubmission(Base):
+    """What the prospect filled in on the web, tied back to the call."""
+
+    __tablename__ = "application_submissions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lead_id: Mapped[int] = mapped_column(
+        ForeignKey("leads.id"), nullable=False, index=True
+    )
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("onboarding_sessions.id"), nullable=False, index=True
+    )
+    employment_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    monthly_income: Mapped[int] = mapped_column(Integer, nullable=False)
+    address_line: Mapped[str] = mapped_column(String(200), nullable=False)
+    city: Mapped[str] = mapped_column(String(80), nullable=False)
+    pincode: Mapped[str] = mapped_column(String(10), nullable=False)
+    credit_check_consent: Mapped[bool] = mapped_column(nullable=False)
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
 class EligibilityAssessment(Base):
     """Decision plus the reasons behind it, pinned to a policy version."""
 

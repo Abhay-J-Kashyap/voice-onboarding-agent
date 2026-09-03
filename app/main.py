@@ -15,7 +15,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.db import init_db
 from app.errors import ToolError
 from app.observability import TRACE_ID, TracingMiddleware, configure_logging, log_event
 from app.routers import admin, tools
@@ -27,7 +26,11 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging(settings.log_level)
-    init_db()
+    # The schema is deliberately not created here. Alembic owns it, and a second
+    # creator is worse than none: create_all makes tables without an
+    # alembic_version row, after which every migration fails with "table already
+    # exists" and the database can never be brought forward again. Deploys run
+    # `alembic upgrade head`; tests build their own schema in conftest.
     log_event("service_started", environment=settings.environment)
     yield
     log_event("service_stopping")

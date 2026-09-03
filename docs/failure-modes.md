@@ -105,9 +105,11 @@ Listed rather than hidden, because a reviewer will find them anyway.
   stranger's phone. The record lookup is not: a compromised platform key could
   still enumerate PANs and learn which are customers. Production needs per-key
   limits and alerting on verification failure rates.
-- **`create_all` instead of migrations.** Fine for a single-instance demo,
-  wrong the moment a second instance or a schema change appears. Alembic is the
-  fix.
+- ~~`create_all` instead of migrations.~~ **Fixed.** Alembic owns the schema,
+  deploys run `upgrade head`, and CI fails if a model change lands without a
+  matching migration. This became urgent rather than theoretical once the data
+  had to survive a restart: three schema additions had already needed manual
+  repair, each getting away with it only because the disk kept being wiped.
 - **No transcript-level scoring.** The harness scores the tool layer
   deterministically, and cross-checks the stored record against the live
   responses. Whether the agent *said* the right thing is still scored by hand

@@ -3,7 +3,18 @@
 install:
 	pip install -r requirements-dev.txt
 
-seed:
+# Apply all outstanding migrations. This is the only supported way to change a
+# deployed schema; init_db exists for tests and scratch databases only.
+migrate:
+	alembic upgrade head
+
+# Generate a migration after changing models. Always read the generated file
+# before committing it — autogenerate is a good first draft, not an oracle.
+migration:
+	@test -n "$(m)" || (echo 'usage: make migration m="what changed"'; exit 1)
+	alembic revision --autogenerate -m "$(m)"
+
+seed: migrate
 	python -m app.seed
 
 # Demo mode is on locally so the passcode appears in the tool response and the

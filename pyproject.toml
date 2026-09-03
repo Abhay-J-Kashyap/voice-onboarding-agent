@@ -11,6 +11,10 @@ addopts = "-q"
 [tool.ruff]
 line-length = 95
 target-version = "py312"
+# Generated migrations are Alembic's output, not hand-written code. Reformatting
+# them to satisfy a style rule risks changing DDL for cosmetic reasons, and the
+# diff noise buries the one line that actually matters in a review.
+extend-exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

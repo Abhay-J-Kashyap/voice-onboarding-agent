@@ -3,14 +3,16 @@
 Each row exists to exercise a specific branch of the policy, so the eval
 personas in `evals/` map one-to-one onto these records. Run with:
 
-    python -m app.seed
+    alembic upgrade head && python -m app.seed
+
+or simply `make seed`, which runs the migration first.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 
-from app.db import SessionLocal, init_db
+from app.db import SessionLocal
 from app.models import Customer
 
 # All PANs are syntactically valid but deliberately fictitious.
@@ -136,10 +138,18 @@ def seed(reset: bool = False) -> int:
     only fields that are currently unset — never overwriting a value someone
     might have edited — keeps this safe to run against a live database.
     """
-    init_db()
+    # No schema creation here. Alembic owns it, and creating tables from a
+    # seed script would leave the database without an alembic_version row —
+    # after which every migration fails with "table already exists". Run
+    # `alembic upgrade head` first; `make seed` does that for you.
     inserted = 0
     updated = 0
     with SessionLocal() as db:
+        if not inspect(db.get_bind()).has_table("customers"):
+            raise RuntimeError(
+                "No schema found. Run 'alembic upgrade head' first, "
+                "or use 'make seed' which does it for you."
+            )
         if reset:
             db.query(Customer).delete()
             db.commit()

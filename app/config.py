@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     email_timeout_seconds: float = 3.0
     email_max_retries: int = 1
 
+    # Where the emailed application link points. Must be the externally
+    # reachable origin, not localhost, or the link in a real email is dead.
+    public_base_url: str = "http://localhost:8000"
+    #: Long enough that someone can finish after dinner, short enough that a
+    #: forwarded or leaked email stops working within a day or two.
+    application_link_ttl_hours: int = 48
+
     # Returns the generated passcode in the tool response under `data.demo_otp`
     # so a live demo can be driven without an SMS provider. The value is never
     # placed in `agent_message`, so the model cannot read it aloud. MUST be

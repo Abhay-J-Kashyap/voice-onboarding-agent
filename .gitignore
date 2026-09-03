@@ -10,3 +10,4 @@ venv/
 .ruff_cache/
 evals/report.md
 evals/report.json
+alembic/versions/__pycache__/

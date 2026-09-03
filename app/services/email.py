@@ -30,18 +30,42 @@ class EmailSender(Protocol):
         """Return True when the provider accepted the message for delivery."""
         ...
 
+    def send_application_link(
+        self, *, email: str, full_name: str, reference: str, url: str
+    ) -> bool:
+        """Send the link that continues an application on the web."""
+        ...
+
 
 class ConsoleEmailSender:
-    """Writes the passcode to the structured log instead of sending it."""
+    """Writes the message to the structured log instead of sending it."""
 
     def send_passcode(self, *, email: str, code: str, ttl_minutes: int) -> bool:
         log_event(
             "email_dispatched",
             level=logging.INFO,
             provider="console",
+            kind="passcode",
             email=mask_email(email),
             passcode=code,
             ttl_minutes=ttl_minutes,
+        )
+        return True
+
+    def send_application_link(
+        self, *, email: str, full_name: str, reference: str, url: str
+    ) -> bool:
+        # The URL is logged in full here for the same reason the passcode is:
+        # in console mode the log *is* the delivery channel. A real provider
+        # must never do this, because the link is the credential.
+        log_event(
+            "email_dispatched",
+            level=logging.INFO,
+            provider="console",
+            kind="application_link",
+            email=mask_email(email),
+            reference=reference,
+            url=url,
         )
         return True
 
@@ -70,14 +94,38 @@ class ResendEmailSender:
         self._max_retries = max_retries
 
     def send_passcode(self, *, email: str, code: str, ttl_minutes: int) -> bool:
-        payload = {
-            "from": self._from,
-            "to": [email],
-            "subject": "Your Meridian Finance verification code",
-            "text": (
+        return self._post(
+            email=email,
+            subject="Your Meridian Finance verification code",
+            text=(
                 f"{code} is your Meridian Finance verification code.\n\n"
                 f"It expires in {ttl_minutes} minutes. Never share it with anyone."
             ),
+        )
+
+    def send_application_link(
+        self, *, email: str, full_name: str, reference: str, url: str
+    ) -> bool:
+        first_name = full_name.split()[0] if full_name.split() else "there"
+        return self._post(
+            email=email,
+            subject=f"Finish your Meridian Finance application ({reference})",
+            text=(
+                f"Hello {first_name},\n\n"
+                "Thanks for speaking with us. You can finish your application "
+                f"here:\n\n{url}\n\n"
+                f"Your reference is {reference}. The link works once and expires "
+                "in 48 hours. If you did not request this, ignore this email and "
+                "the link will lapse on its own."
+            ),
+        )
+
+    def _post(self, *, email: str, subject: str, text: str) -> bool:
+        payload = {
+            "from": self._from,
+            "to": [email],
+            "subject": subject,
+            "text": text,
         }
         headers = {
             "Authorization": f"Bearer {self._api_key}",

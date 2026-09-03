@@ -25,9 +25,48 @@ jobs:
       - name: Unit and integration tests
         run: pytest -q
 
+  migrations:
+    # Two things are checked here. First, that the migrations actually apply to
+    # an empty database and reverse cleanly. Second, and more useful, that no
+    # model change has been committed without a matching migration — the drift
+    # that silently leaves a deployed schema stale.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Migrations apply to an empty database
+        env:
+          DATABASE_URL: sqlite:///./ci_migrate.db
+        run: alembic upgrade head
+      - name: Migrations reverse cleanly
+        env:
+          DATABASE_URL: sqlite:///./ci_migrate.db
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+      - name: Models and migrations agree
+        env:
+          DATABASE_URL: sqlite:///./ci_migrate.db
+        run: |
+          alembic revision --autogenerate -m "ci drift probe" >/dev/null
+          probe=$(ls -t alembic/versions/*ci_drift_probe*.py | head -1)
+          # Matches both op.* and batch_op.*: render_as_batch emits the latter,
+          # and a pattern anchored on "op." alone silently misses every
+          # column change. Verified by deliberately introducing drift.
+          if grep -qE "(batch_)?op\.(create|drop|alter|add|rename)_" "$probe"; then
+            echo "Models have changed without a migration. Generated diff:"
+            sed -n '/def upgrade/,/def downgrade/p' "$probe"
+            exit 1
+          fi
+          echo "No schema drift."
+
   evals:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, migrations]
     strategy:
       # Both delivery channels get a full end-to-end run. The unit tests cover
       # each adapter in isolation, but only this catches a channel that is wired
@@ -52,6 +91,7 @@ jobs:
           OTP_DEMO_MODE: "true"
           OTP_DELIVERY_CHANNEL: ${{ matrix.channel }}
         run: |
+          alembic upgrade head
           python -m app.seed
           nohup uvicorn app.main:app --port 8000 > /tmp/service.log 2>&1 &
           for i in $(seq 1 30); do
@@ -84,7 +124,7 @@ jobs:
     # setting. A regression here would either break real deployments or make the
     # suite silently meaningless against them.
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, migrations]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -94,6 +134,7 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - name: Seed and start service
         run: |
+          alembic upgrade head
           python -m app.seed
           nohup uvicorn app.main:app --port 8000 > /tmp/service.log 2>&1 &
           for i in $(seq 1 30); do

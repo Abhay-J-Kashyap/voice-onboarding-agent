@@ -12,6 +12,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY evals ./evals
+# Migrations ship with the image so a deploy can bring the schema forward.
+COPY alembic ./alembic
+COPY alembic.ini .
 
 # Run unprivileged. The container writes only to /srv/data.
 RUN useradd --create-home --uid 10001 appuser \

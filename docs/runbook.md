@@ -123,28 +123,54 @@ which point Alembic and a two-phase deploy become mandatory.
 
 ## Schema changes
 
-`create_all` does not alter existing tables. Three additions so far — the
-passcode table, the customer email column, the leads table — have each needed
-manual repair on a database that outlived them.
+Alembic owns the schema. `alembic upgrade head` runs on every deploy and is the
+only supported way to change a deployed database — `init_db` creates tables from
+the models but can never alter an existing one, which is why it is now confined
+to tests and scratch databases.
 
-`seed()` backfills fields that are unset on existing rows, which covers new
-columns without a wipe. For a genuinely broken schema, a one-off reset is
-available:
+After changing a model:
 
 ```
-python -c "from app.seed import seed; print('Seeded', seed(reset=True))"
+make migration m="what changed"     # generates a revision
 ```
 
-That deletes every customer row. It does not touch sessions or audit records, but
-those reference customers, so treat it as destructive and revert the start
-command afterwards.
+**Read the generated file before committing it.** Autogenerate is a good first
+draft and a poor oracle: it does not see renames (it emits a drop plus an add,
+which loses data), and it guesses at server defaults. CI fails the build if a
+model change is committed without a matching migration.
 
-This is a workaround for the absence of migrations, not a substitute for them.
+To apply:
+
+```
+make migrate
+```
+
+Rolling back one revision is `alembic downgrade -1`. Verify the downgrade path
+locally before relying on it in an incident — a migration that only goes forward
+is a migration you cannot retreat from.
+
+`seed()` still backfills unset fields on existing rows. That is now belt and
+braces rather than the mechanism.
+
+## Postgres
+
+Set `DATABASE_URL` to a `postgresql+psycopg://` URL. Neon's free tier works and
+requires `?sslmode=require`.
+
+Two behaviours to expect from serverless Postgres. It scales to zero, so the
+first query after an idle period pays a cold start of a few hundred
+milliseconds — noticeable against a 70ms baseline, invisible against a voice
+turn. And it recycles connections aggressively, which is why the engine uses a
+small pool with `pool_recycle` and `pool_pre_ping`; without those, the first
+call after idling fails on a connection the server already dropped.
+
+Anything that must outlive a restart needs Postgres rather than SQLite. The
+application link flow is the clearest case: the link is valid for 48 hours, so
+ephemeral storage can kill a good link between sending the email and the
+applicant opening it.
 
 ## Before running more than one instance
 
-- Replace SQLite with Postgres (`DATABASE_URL`)
-- Replace `create_all` with Alembic migrations
 - Add per-key rate limiting
 - Confirm idempotency behaviour under real concurrency — the constraint is in
   place, but it has only been exercised against SQLite

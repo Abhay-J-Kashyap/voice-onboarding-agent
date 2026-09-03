@@ -233,8 +233,14 @@ Moving to Postgres is a `DATABASE_URL` change. The data access layer is plain
 SQLAlchemy 2.0 with no SQLite-specific SQL; the only conditional code is the
 pragma listener in `app/db.py`, which no-ops on other backends.
 
-`create_all` has now been outgrown. Three schema additions — the passcode table,
-the customer email column, the leads table — have each needed manual repair on a
-database that outlived them, and `seed()` carries backfill logic that exists only
-because there are no migrations. Alembic is the fix and is the first thing to do
-before this runs anywhere real.
+Alembic owns the schema. `init_db` still exists for tests and scratch databases,
+but it can only create tables, never alter them, which is precisely how three
+schema additions each ended up needing manual repair during development. Every
+deploy runs `alembic upgrade head`, and CI fails the build when a model change is
+committed without a matching migration — the drift that otherwise leaves a
+deployed schema quietly stale.
+
+The switch became necessary rather than merely correct once the data had to
+outlive a restart. An application link is valid for 48 hours; on ephemeral
+storage a wipe between sending the email and the applicant opening it kills a
+perfectly good link, so the link flow cannot be built on SQLite-on-a-container.
