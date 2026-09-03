@@ -2,25 +2,38 @@
 
 ## Shape of the system
 
-```
-  Caller (phone / browser)
-          │
-          ▼
-  Sarvam Voice Agents          managed: STT, turn-taking, barge-in,
-  (speech + LLM + TTS)         TTS, telephony, call recording
-          │
-          │  HTTPS tool calls, x-api-key + x-trace-id
-          ▼
-  This service (FastAPI)
-    ├── state machine          what the agent is allowed to do next
-    ├── policy engine          what the answer is
-    ├── passcode service       proof of possession, with its own limits
-    ├── delivery adapters      SMS or email, behind one interface
-    ├── audit store            what actually happened
-    └── structured logs        how to find out why
-          │
-          ▼
-  SQLite (dev) / Postgres (prod)
+```mermaid
+flowchart TB
+    Caller(["📞 Caller<br/>phone call"])
+    Applicant(["🌐 Applicant<br/>browser, from an emailed link"])
+
+    Sarvam["<b>Sarvam Voice Agents</b><br/>STT · LLM · TTS · telephony<br/><i>managed, not built here</i>"]
+
+    subgraph SVC["This service — FastAPI"]
+        direction TB
+        SM["State machine<br/><small>what's allowed next</small>"]
+        POLICY["Policy engine<br/><small>deterministic, versioned</small>"]
+        OTP["Passcode service<br/><small>possession, not just knowledge</small>"]
+        DELIVERY["Delivery adapters<br/><small>SMS or email, one interface</small>"]
+        WEBAPP["Application pages<br/><small>token-authenticated, no API key</small>"]
+        AUDIT["Audit store<br/><small>what actually happened</small>"]
+    end
+
+    DB[("Postgres<br/>Neon")]
+
+    Caller -- voice --> Sarvam
+    Sarvam -- "HTTPS tool calls<br/>x-api-key + x-trace-id" --> SVC
+    SVC --> DB
+    DELIVERY -. "passcode or<br/>application link" .-> Applicant
+    Applicant -- "GET / POST<br/>/apply/{token}" --> WEBAPP
+
+    classDef voice fill:#EDE7F6,stroke:#5E35B1,color:#311B92
+    classDef web fill:#E0F2F1,stroke:#00796B,color:#004D40
+    classDef store fill:#FFF3E0,stroke:#E65100,color:#BF360C
+
+    class Caller,Sarvam voice
+    class Applicant,WEBAPP web
+    class DB store
 ```
 
 ## Division of responsibility
@@ -45,42 +58,82 @@ an awkward sentence, it does not live in the prompt.
 `app/models.py` defines `SessionState` and an explicit transition table. Every
 tool call passes a state guard before doing work.
 
+```mermaid
+stateDiagram-v2
+    [*] --> started
+
+    started --> identity_matched : verify_identity — record found
+    started --> prospect : verify_identity — not_registered
+    started --> blocked : attempts exhausted / sanctioned
+    started --> escalated
+
+    identity_matched --> identity_verified : verify_otp — correct
+    identity_matched --> blocked : otp attempts exhausted
+    identity_matched --> escalated
+
+    identity_verified --> eligibility_assessed : check_eligibility
+    identity_verified --> escalated
+
+    eligibility_assessed --> consent_recorded : record_consent
+    eligibility_assessed --> escalated
+
+    consent_recorded --> completed
+    consent_recorded --> escalated
+
+    prospect --> lead_captured : capture_lead
+    prospect --> blocked
+    prospect --> escalated
+
+    completed --> [*]
+    lead_captured --> [*]
+    blocked --> [*]
+    escalated --> [*]
+
+    note right of identity_matched
+        Knowledge factor only —
+        anyone holding a photocopy
+        of the PAN card gets this far
+    end note
+
+    note right of identity_verified
+        Possession factor confirmed —
+        this is what actually
+        authorises the application
+    end note
+
+    note right of escalated
+        Reachable from every live state.
+        Enforced as an invariant
+        (require_live), not a list —
+        a listed enumeration is what
+        silently lost this edge when
+        prospect was added
+    end note
 ```
-                      ┌──────────────► escalated  (from any live state)
-                      │
-  started ─┬─► identity_matched ─► identity_verified ─► eligibility_assessed
-           │      (knows the           (holds the           │
-           │       details)             phone/inbox)        ▼
-           │                                          consent_recorded
-           │                                                │
-           │                                                ▼
-           │                                            completed
-           │
-           └─► prospect ─► lead_captured
-                (no account exists)
-```
 
-Two things this buys that a prompt cannot.
+Two things this diagram makes visible that the transition table alone does not.
 
-**Ordering is enforced, not requested.** Models skip steps under pressure from a
-caller, lose track across long calls, and can be talked into "just this once".
-Scenarios S10 and S11 exercise consent before verification and writing after a
-hand-off; both are refused with a 409 and a recoverable message, so the call
-continues gracefully rather than crashing.
+**Every live state has an edge into `escalated`.** That is not incidental — it is
+the one property the diagram is drawn to prove. When `prospect` was added to the
+machine, the escalation endpoint enumerated its permitted states and silently
+lost the edge from the new one; a caller with no account who then asked for a
+human would have been refused. The fix expresses the property structurally
+(`require_live` rejects only terminal states) rather than as a list, and this
+diagram is what a reviewer can check it against without reading the transition
+table.
 
-**The two identity claims stay distinct.** Matching PAN, date of birth and name
-proves the caller knows what is printed on a card — anyone holding a photocopy
-gets that far. A passcode delivered to the *registered* contact proves
-possession. They are different claims, so they are different states, and
-`eligibility_assessed` is unreachable from `identity_matched`. A model that
-treats a located record as a verified caller is refused by the service (S19).
+**`identity_matched` and `identity_verified` are drawn as genuinely different
+states, not two labels on one step.** The first proves the caller knows what is
+printed on a PAN card. The second proves they hold the phone or inbox the
+system already trusts. `eligibility_assessed` has no edge from
+`identity_matched` — a model that treats a located record as a verified caller
+is refused by the machine itself (S19).
 
-**Escalation is available from every live state**, expressed as an invariant
-rather than a list. `require_live` rejects only terminal states. This matters:
-when the prospect state was added, the escalation endpoint enumerated its
-permitted states and silently lost the hand-off from the new one. A test now
-asserts the property against every state in the machine, so the next state added
-either keeps escalation or fails the suite.
+**Ordering is enforced, not requested, everywhere else too.** Models skip steps
+under pressure from a caller, lose track across long calls, and can be talked
+into "just this once". Scenarios S10 and S11 exercise consent before
+verification and writing after a hand-off; both are refused with a 409 and a
+recoverable message, so the call continues gracefully rather than crashing.
 
 ## The two identity paths
 

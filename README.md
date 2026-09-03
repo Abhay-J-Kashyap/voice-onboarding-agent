@@ -9,11 +9,44 @@ The voice pipeline runs on Sarvam's managed Voice Agents platform. **This
 repository is everything the platform calls into** — the state machine, the credit
 policy, the audit trail, the observability, and the evaluation harness.
 
+```mermaid
+flowchart TB
+    Caller(["📞 Caller<br/>phone call"])
+    Applicant(["🌐 Applicant<br/>browser, from an emailed link"])
+
+    Sarvam["<b>Sarvam Voice Agents</b><br/>STT · LLM · TTS · telephony<br/><i>managed, not built here</i>"]
+
+    subgraph SVC["This service — FastAPI"]
+        direction TB
+        SM["State machine<br/><small>what's allowed next</small>"]
+        POLICY["Policy engine<br/><small>deterministic, versioned</small>"]
+        OTP["Passcode service<br/><small>possession, not just knowledge</small>"]
+        DELIVERY["Delivery adapters<br/><small>SMS or email, one interface</small>"]
+        WEBAPP["Application pages<br/><small>token-authenticated, no API key</small>"]
+        AUDIT["Audit store<br/><small>what actually happened</small>"]
+    end
+
+    DB[("Postgres<br/>Neon")]
+
+    Caller -- voice --> Sarvam
+    Sarvam -- "HTTPS tool calls<br/>x-api-key + x-trace-id" --> SVC
+    SVC --> DB
+    DELIVERY -. "passcode or<br/>application link" .-> Applicant
+    Applicant -- "GET / POST<br/>/apply/{token}" --> WEBAPP
+
+    classDef voice fill:#EDE7F6,stroke:#5E35B1,color:#311B92
+    classDef web fill:#E0F2F1,stroke:#00796B,color:#004D40
+    classDef store fill:#FFF3E0,stroke:#E65100,color:#BF360C
+
+    class Caller,Sarvam voice
+    class Applicant,WEBAPP web
+    class DB store
 ```
-Caller ──▶ Sarvam Voice Agents ──▶ this service ──▶ Postgres / SQLite
-           (STT, LLM, TTS,          (state machine,
-            barge-in, telephony)     policy, audit)
-```
+
+Two entry points into the same service and the same database: a voice call
+through Sarvam, and a browser opening the link that call emailed. Purple is the
+call path, teal is the web path — they only ever meet inside the service and at
+the database, never directly.
 
 ## The idea
 
